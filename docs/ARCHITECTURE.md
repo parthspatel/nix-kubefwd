@@ -2,627 +2,238 @@
 
 ## 1. System Overview
 
-### 1.1 High-Level Architecture
+### 1.1 High-Level Architecture (REST API Approach)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              User Space                                  │
-│  ┌──────────────┐     ┌─────────────────────────────────────────────┐  │
-│  │              │     │           kubefwd-daemon                     │  │
-│  │  kubefwd-ctl │────▶│  ┌─────────────────────────────────────┐   │  │
-│  │    (CLI)     │ IPC │  │         Daemon Core                  │   │  │
-│  │              │◀────│  │  ┌─────────┐  ┌──────────────────┐  │   │  │
-│  └──────────────┘     │  │  │  Config │  │  State Manager   │  │   │  │
-│                       │  │  │  Loader │  │                  │  │   │  │
-│                       │  │  └────┬────┘  └────────┬─────────┘  │   │  │
-│                       │  │       │                │            │   │  │
-│                       │  │       ▼                ▼            │   │  │
-│                       │  │  ┌─────────────────────────────┐   │   │  │
-│                       │  │  │    Profile Supervisor       │   │   │  │
-│                       │  │  └─────────────────────────────┘   │   │  │
-│                       │  │       │         │         │        │   │  │
-│                       │  └───────┼─────────┼─────────┼────────┘   │  │
-│                       │          │         │         │            │  │
-│                       │          ▼         ▼         ▼            │  │
-│                       │  ┌───────────┐ ┌───────────┐ ┌───────────┐│  │
-│                       │  │  Profile  │ │  Profile  │ │  Profile  ││  │
-│                       │  │  Worker 1 │ │  Worker 2 │ │  Worker N ││  │
-│                       │  └─────┬─────┘ └─────┬─────┘ └─────┬─────┘│  │
-│                       │        │             │             │      │  │
-│                       └────────┼─────────────┼─────────────┼──────┘  │
-│                                │             │             │         │
-│                                ▼             ▼             ▼         │
-│                        ┌───────────┐ ┌───────────┐ ┌───────────┐    │
-│                        │  kubefwd  │ │  kubefwd  │ │  kubefwd  │    │
-│                        │  process  │ │  process  │ │  process  │    │
-│                        └───────────┘ └───────────┘ └───────────┘    │
-└─────────────────────────────────────────────────────────────────────────┘
-                                        │
-                                        ▼
-                              ┌───────────────────┐
-                              │   Kubernetes API  │
-                              │   (port-forward)  │
-                              └───────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              User Space                                      │
+│                                                                              │
+│  ┌──────────────┐     ┌──────────────────────────────────────────────────┐  │
+│  │              │     │              kubefwd-daemon (Rust)                │  │
+│  │  kubefwd-ctl │────▶│  ┌────────────────────────────────────────────┐  │  │
+│  │    (CLI)     │ IPC │  │              Daemon Core                    │  │  │
+│  │              │◀────│  │  ┌──────────┐  ┌───────────┐  ┌──────────┐ │  │  │
+│  └──────────────┘     │  │  │  Config  │  │   State   │  │   IPC    │ │  │  │
+│                       │  │  │  Loader  │  │  Manager  │  │  Server  │ │  │  │
+│                       │  │  └────┬─────┘  └─────┬─────┘  └──────────┘ │  │  │
+│                       │  │       │              │                      │  │  │
+│                       │  │       ▼              ▼                      │  │  │
+│                       │  │  ┌─────────────────────────────────────┐   │  │  │
+│                       │  │  │       Kubefwd Controller            │   │  │  │
+│                       │  │  │  ┌─────────────┐  ┌──────────────┐  │   │  │  │
+│                       │  │  │  │ REST Client │  │ SSE Listener │  │   │  │  │
+│                       │  │  │  │ (reqwest)   │  │ (async)      │  │   │  │  │
+│                       │  │  │  └──────┬──────┘  └───────┬──────┘  │   │  │  │
+│                       │  │  └─────────┼─────────────────┼─────────┘   │  │  │
+│                       │  └────────────┼─────────────────┼─────────────┘  │  │
+│                       │               │                 │                │  │
+│                       └───────────────┼─────────────────┼────────────────┘  │
+│                                       │                 │                   │
+│                                       ▼                 ▼                   │
+│                          ┌─────────────────────────────────────────────┐   │
+│                          │         kubefwd (single process)            │   │
+│                          │         --api --idle mode                   │   │
+│                          │                                             │   │
+│                          │  REST API: http://kubefwd.internal/api/v1   │   │
+│                          │  SSE Events: /api/v1/events                 │   │
+│                          └─────────────────────────────────────────────┘   │
+│                                              │                              │
+└──────────────────────────────────────────────┼──────────────────────────────┘
+                                               │
+                                               ▼
+                                     ┌───────────────────┐
+                                     │   Kubernetes API  │
+                                     │   (port-forward)  │
+                                     └───────────────────┘
 ```
 
-### 1.2 Component Summary
+### 1.2 Deployment Modes
+
+The daemon supports **three deployment modes** to handle different use cases:
+
+| Mode | Use Case | Isolation | Lifecycle |
+|------|----------|-----------|-----------|
+| **System Service** | Always-on forwarding | Shared across all projects | systemd/launchd managed |
+| **User Service** | Per-user forwarding | Shared within user session | systemd user service |
+| **Devenv Service** | Per-project forwarding | Isolated per project | devenv process-compose |
+
+### 1.3 Component Summary
 
 | Component | Responsibility |
 |-----------|----------------|
-| **kubefwd-ctl** | CLI tool for user interaction with daemon |
-| **Daemon Core** | Main daemon process lifecycle and coordination |
-| **Config Loader** | Parse, validate, and watch configuration files |
-| **State Manager** | Track and persist connection/profile states |
-| **Profile Supervisor** | Manage lifecycle of profile workers |
-| **Profile Worker** | Manage single kubefwd process with reconnection logic |
+| **kubefwd-ctl** | CLI tool for user interaction |
+| **Daemon Core** | Process lifecycle and coordination |
+| **Config Loader** | Parse, validate, watch configuration |
+| **State Manager** | Track connection state and metrics |
+| **Kubefwd Controller** | REST API client + SSE event listener |
+| **IPC Server** | Unix socket for CLI communication |
 
 ---
 
-## 2. Component Design
+## 2. Project Isolation Strategy
 
-### 2.1 Daemon Core
+### 2.1 The Isolation Problem
 
-The daemon core is the main entry point and orchestrator.
-
-```rust
-// Conceptual structure
-pub struct Daemon {
-    config: Arc<RwLock<DaemonConfig>>,
-    state: Arc<StateManager>,
-    supervisor: ProfileSupervisor,
-    ipc_server: IpcServer,
-    shutdown_tx: broadcast::Sender<()>,
-}
-
-impl Daemon {
-    pub async fn run(&mut self) -> Result<()>;
-    pub async fn shutdown(&mut self) -> Result<()>;
-    pub async fn reload_config(&mut self) -> Result<()>;
-}
-```
-
-**Responsibilities:**
-- Initialize all subsystems
-- Handle Unix signals (SIGTERM, SIGHUP, SIGINT)
-- Manage IPC server for CLI communication
-- Coordinate graceful shutdown
-
-**Signal Handling:**
-| Signal | Action |
-|--------|--------|
-| SIGTERM | Graceful shutdown |
-| SIGINT | Graceful shutdown |
-| SIGHUP | Reload configuration |
-| SIGUSR1 | Dump state to logs |
-
-### 2.2 Configuration System
-
-#### 2.2.1 Configuration File Structure
+When multiple projects use kubefwd simultaneously, conflicts can occur:
 
 ```
-~/.config/kubefwd-daemon/
-├── config.yaml          # Main configuration
-└── profiles.d/          # Optional: split profiles
-    ├── dev.yaml
-    └── staging.yaml
+Project A (e-commerce)          Project B (analytics)
+─────────────────────          ─────────────────────
+namespace: prod                namespace: prod
+service: api → 127.0.0.1:8080  service: api → 127.0.0.1:8080  ← CONFLICT!
+service: db  → 127.0.0.1:5432  service: db  → 127.0.0.1:5432  ← CONFLICT!
 ```
 
-#### 2.2.2 Configuration Schema (Rust Types)
+### 2.2 Isolation Mechanisms
 
-```rust
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DaemonConfig {
-    pub daemon: DaemonSettings,
-    pub defaults: DefaultSettings,
-    pub profiles: HashMap<String, ProfileConfig>,
-}
+#### Option A: Per-Project Kubefwd Instance (Recommended for Devenv)
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DaemonSettings {
-    pub log_level: LogLevel,
-    pub log_file: Option<PathBuf>,
-    pub pid_file: PathBuf,
-    pub socket_path: PathBuf,
-    pub state_file: PathBuf,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DefaultSettings {
-    pub retry: RetryConfig,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RetryConfig {
-    pub initial_delay: Duration,
-    pub max_delay: Duration,
-    pub multiplier: f64,
-    pub max_attempts: u32,  // 0 = infinite
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ProfileConfig {
-    pub enabled: bool,
-    pub kubeconfig: Option<PathBuf>,
-    pub context: Option<String>,
-    pub namespaces: Vec<String>,
-    pub labels: Vec<String>,
-    pub exclude_services: Vec<String>,
-    pub retry: Option<RetryConfig>,  // Override defaults
-}
-```
-
-#### 2.2.3 Config Loader
-
-```rust
-pub struct ConfigLoader {
-    config_path: PathBuf,
-    watcher: Option<notify::RecommendedWatcher>,
-}
-
-impl ConfigLoader {
-    pub fn load(&self) -> Result<DaemonConfig>;
-    pub fn validate(&self, config: &DaemonConfig) -> Result<()>;
-    pub fn watch(&mut self, tx: mpsc::Sender<ConfigEvent>) -> Result<()>;
-}
-```
-
-**Validation Rules:**
-- All paths must be absolute or expandable (~)
-- At least one profile must be defined
-- Namespace list cannot be empty for enabled profiles
-- Retry multiplier must be > 1.0
-- Kubeconfig file must exist (if specified)
-
-### 2.3 State Manager
-
-Tracks runtime state and persists across restarts.
-
-#### 2.3.1 State Structure
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DaemonState {
-    pub started_at: DateTime<Utc>,
-    pub profiles: HashMap<String, ProfileState>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProfileState {
-    pub status: ProfileStatus,
-    pub pid: Option<u32>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub last_healthy_at: Option<DateTime<Utc>>,
-    pub reconnect_count: u64,
-    pub consecutive_failures: u32,
-    pub last_error: Option<String>,
-    pub current_backoff: Duration,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum ProfileStatus {
-    Starting,
-    Running,
-    Reconnecting,
-    Backoff,
-    Stopped,
-    Failed,
-    Disabled,
-}
-```
-
-#### 2.3.2 State Persistence
-
-```rust
-pub struct StateManager {
-    state: Arc<RwLock<DaemonState>>,
-    state_file: PathBuf,
-    persist_interval: Duration,
-}
-
-impl StateManager {
-    pub async fn load_or_init(&mut self) -> Result<()>;
-    pub async fn persist(&self) -> Result<()>;
-    pub fn update_profile(&self, name: &str, update: impl FnOnce(&mut ProfileState));
-    pub fn get_snapshot(&self) -> DaemonState;
-}
-```
-
-State is persisted:
-- Periodically (every 30 seconds)
-- On significant state changes
-- On graceful shutdown
-
-### 2.4 Profile Supervisor
-
-Manages the lifecycle of all profile workers.
-
-```rust
-pub struct ProfileSupervisor {
-    workers: HashMap<String, ProfileWorkerHandle>,
-    state: Arc<StateManager>,
-    event_tx: mpsc::Sender<DaemonEvent>,
-}
-
-impl ProfileSupervisor {
-    pub async fn start_profile(&mut self, name: &str, config: ProfileConfig) -> Result<()>;
-    pub async fn stop_profile(&mut self, name: &str) -> Result<()>;
-    pub async fn restart_profile(&mut self, name: &str) -> Result<()>;
-    pub async fn stop_all(&mut self) -> Result<()>;
-    pub fn get_profile_status(&self, name: &str) -> Option<ProfileStatus>;
-}
-```
-
-### 2.5 Profile Worker
-
-Each profile worker manages a single kubefwd process.
-
-#### 2.5.1 Worker Structure
-
-```rust
-pub struct ProfileWorker {
-    name: String,
-    config: ProfileConfig,
-    retry_config: RetryConfig,
-    state: Arc<StateManager>,
-    shutdown_rx: broadcast::Receiver<()>,
-}
-
-impl ProfileWorker {
-    pub async fn run(&mut self) -> Result<()>;
-    async fn spawn_kubefwd(&self) -> Result<Child>;
-    async fn monitor_process(&mut self, child: Child) -> ProcessExitReason;
-    async fn wait_backoff(&mut self);
-    fn calculate_next_backoff(&mut self);
-    fn reset_backoff(&mut self);
-}
-```
-
-#### 2.5.2 Worker State Machine
+Each project runs its own kubefwd instance with isolated networking:
 
 ```
-                    ┌─────────────────────────────────────────────────┐
-                    │                                                 │
-                    ▼                                                 │
-              ┌──────────┐                                           │
-     ┌───────▶│ Starting │                                           │
-     │        └────┬─────┘                                           │
-     │             │ spawn kubefwd                                   │
-     │             ▼                                                 │
-     │        ┌──────────┐  healthy for 30s   ┌──────────┐          │
-     │        │ Running  │──────────────────▶│ Running  │          │
-     │        │ (probing)│                    │ (stable) │          │
-     │        └────┬─────┘                    └────┬─────┘          │
-     │             │                               │                 │
-     │             │ process exit                  │ process exit    │
-     │             ▼                               ▼                 │
-     │        ┌────────────────────────────────────────┐            │
-     │        │              Reconnecting              │            │
-     │        └────────────────┬───────────────────────┘            │
-     │                         │                                     │
-     │                         ▼                                     │
-     │                    ┌─────────┐                                │
-     │                    │ Backoff │────────────────────────────────┘
-     │                    └────┬────┘   wait complete
-     │                         │
-     │                         │ max_attempts reached (if set)
-     │                         ▼
-     │                    ┌─────────┐
-     │                    │ Failed  │
-     │                    └────┬────┘
-     │                         │
-     │                         │ manual restart
-     └─────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Host Machine                                  │
+│                                                                      │
+│  ┌─────────────────────────┐    ┌─────────────────────────┐        │
+│  │   Project A (devenv)    │    │   Project B (devenv)    │        │
+│  │                         │    │                         │        │
+│  │  kubefwd instance       │    │  kubefwd instance       │        │
+│  │  API: localhost:9876    │    │  API: localhost:9877    │        │
+│  │  IP range: 127.1.0.x    │    │  IP range: 127.2.0.x    │        │
+│  │                         │    │                         │        │
+│  │  api.prod → 127.1.0.1   │    │  api.prod → 127.2.0.1   │        │
+│  │  db.prod  → 127.1.0.2   │    │  db.prod  → 127.2.0.2   │        │
+│  └─────────────────────────┘    └─────────────────────────┘        │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-#### 2.5.3 Kubefwd Process Management
+**Implementation:**
+```yaml
+# Project A: .envrc or devenv.nix
+KUBEFWD_API_PORT: 9876
+KUBEFWD_IP_PREFIX: "127.1"
 
-```rust
-impl ProfileWorker {
-    async fn spawn_kubefwd(&self) -> Result<Child> {
-        let mut cmd = Command::new("sudo");
-        cmd.arg("-E")
-           .arg("kubefwd")
-           .arg("svc");
-
-        // Add kubeconfig if specified
-        if let Some(ref kubeconfig) = self.config.kubeconfig {
-            cmd.env("KUBECONFIG", kubeconfig);
-        }
-
-        // Add context if specified
-        if let Some(ref context) = self.config.context {
-            cmd.args(["--context", context]);
-        }
-
-        // Add namespaces
-        for ns in &self.config.namespaces {
-            cmd.args(["-n", ns]);
-        }
-
-        // Add label selectors
-        for label in &self.config.labels {
-            cmd.args(["-l", label]);
-        }
-
-        cmd.stdout(Stdio::piped())
-           .stderr(Stdio::piped())
-           .spawn()
-    }
-}
+# Project B: .envrc or devenv.nix
+KUBEFWD_API_PORT: 9877
+KUBEFWD_IP_PREFIX: "127.2"
 ```
 
-#### 2.5.4 Exponential Backoff Algorithm
+#### Option B: Shared Daemon with Profile Namespacing
 
-```rust
-impl ProfileWorker {
-    fn calculate_next_backoff(&mut self) {
-        let state = self.state.get_profile(&self.name);
-        let current = state.current_backoff;
+Single daemon manages all projects with logical isolation:
 
-        // Calculate next backoff with jitter
-        let next = Duration::from_secs_f64(
-            current.as_secs_f64() * self.retry_config.multiplier
-        );
+```yaml
+# ~/.config/kubefwd-daemon/config.yaml
+profiles:
+  ecommerce-dev:
+    project_id: "ecommerce"      # Used for /etc/hosts prefixing
+    namespaces: [development]
+    context: ecommerce-cluster
 
-        // Apply jitter (±10%)
-        let jitter = rand::thread_rng().gen_range(0.9..1.1);
-        let next_with_jitter = Duration::from_secs_f64(next.as_secs_f64() * jitter);
-
-        // Clamp to max
-        let clamped = next_with_jitter.min(self.retry_config.max_delay);
-
-        self.state.update_profile(&self.name, |s| {
-            s.current_backoff = clamped;
-            s.consecutive_failures += 1;
-        });
-    }
-
-    fn reset_backoff(&mut self) {
-        self.state.update_profile(&self.name, |s| {
-            s.current_backoff = self.retry_config.initial_delay;
-            s.consecutive_failures = 0;
-        });
-    }
-}
+  analytics-dev:
+    project_id: "analytics"
+    namespaces: [development]
+    context: analytics-cluster
 ```
 
-### 2.6 IPC System
-
-#### 2.6.1 Protocol
-
-Communication between CLI and daemon uses a simple JSON-based protocol over Unix domain socket.
-
-```rust
-#[derive(Debug, Serialize, Deserialize)]
-pub struct IpcRequest {
-    pub id: u64,
-    pub command: IpcCommand,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum IpcCommand {
-    Status,
-    GetProfile { name: String },
-    StartProfile { name: String },
-    StopProfile { name: String },
-    RestartProfile { name: String },
-    EnableProfile { name: String },
-    DisableProfile { name: String },
-    ReloadConfig,
-    Shutdown,
-    GetLogs { lines: u32, profile: Option<String> },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct IpcResponse {
-    pub id: u64,
-    pub result: IpcResult,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum IpcResult {
-    Ok(serde_json::Value),
-    Error { code: u32, message: String },
-}
+**Hosts file isolation:**
+```
+# /etc/hosts (managed by kubefwd)
+127.1.0.1  api.development.svc.cluster.local      # ecommerce
+127.1.0.2  db.development.svc.cluster.local       # ecommerce
+127.2.0.1  api.development.svc.cluster.local      # analytics (different IP!)
+127.2.0.2  db.development.svc.cluster.local       # analytics
 ```
 
-#### 2.6.2 IPC Server
+#### Option C: Context-Based Isolation (Simplest)
 
-```rust
-pub struct IpcServer {
-    socket_path: PathBuf,
-    handler: Arc<dyn IpcHandler>,
-}
+Different Kubernetes contexts naturally isolate:
 
-impl IpcServer {
-    pub async fn run(&self, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
-        let listener = UnixListener::bind(&self.socket_path)?;
+```yaml
+profiles:
+  project-a:
+    context: project-a-cluster   # Points to cluster A
+    namespaces: [default]
 
-        // Set permissions (user only)
-        std::fs::set_permissions(&self.socket_path, Permissions::from_mode(0o600))?;
-
-        loop {
-            tokio::select! {
-                accept_result = listener.accept() => {
-                    let (stream, _) = accept_result?;
-                    let handler = self.handler.clone();
-                    tokio::spawn(async move {
-                        handle_connection(stream, handler).await;
-                    });
-                }
-                _ = shutdown.recv() => break,
-            }
-        }
-
-        std::fs::remove_file(&self.socket_path)?;
-        Ok(())
-    }
-}
+  project-b:
+    context: project-b-cluster   # Points to cluster B
+    namespaces: [default]
 ```
 
-### 2.7 CLI (kubefwd-ctl)
+### 2.3 Recommended Isolation by Use Case
 
-#### 2.7.1 Command Structure
-
-```
-kubefwd-ctl <COMMAND>
-
-Commands:
-  start              Start the daemon
-  stop               Stop the daemon
-  restart            Restart the daemon
-  reload             Reload configuration
-  status             Show daemon and profile status
-  logs               View daemon logs
-  profile <COMMAND>  Manage profiles
-    start <name>     Start a specific profile
-    stop <name>      Stop a specific profile
-    restart <name>   Restart a specific profile
-    enable <name>    Enable a profile
-    disable <name>   Disable a profile
-
-Options:
-  -s, --socket <PATH>  Unix socket path [default: /run/kubefwd-daemon.sock]
-  -j, --json           Output in JSON format
-  -v, --verbose        Increase verbosity
-  -h, --help           Print help
-  -V, --version        Print version
-```
-
-#### 2.7.2 Status Output
-
-```
-$ kubefwd-ctl status
-
-kubefwd-daemon v0.1.0
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Daemon Status: Running (uptime: 2d 4h 12m)
-Profiles: 3 active, 1 disabled
-
-┌─────────────────┬──────────┬──────────┬────────────┬───────────┐
-│ Profile         │ Status   │ PID      │ Uptime     │ Reconnects│
-├─────────────────┼──────────┼──────────┼────────────┼───────────┤
-│ dev-services    │ ● Running│ 12345    │ 1d 2h 30m  │ 3         │
-│ staging-api     │ ● Running│ 12346    │ 4h 15m     │ 0         │
-│ prod-readonly   │ ○ Stopped│ -        │ -          │ 2         │
-│ legacy          │ ◌ Disabled│ -       │ -          │ -         │
-└─────────────────┴──────────┴──────────┴────────────┴───────────┘
-
-Last reconnection: dev-services at 2025-01-15 10:30:42 UTC
-```
+| Scenario | Recommended Approach |
+|----------|---------------------|
+| Different K8s clusters | Context-based (Option C) |
+| Same cluster, different namespaces | Profile namespacing (Option B) |
+| Same cluster, same namespace names | Per-project instance (Option A) |
+| CI/CD pipelines | Per-project instance (Option A) |
 
 ---
 
-## 3. Data Flow
+## 3. Nix Integration
 
-### 3.1 Startup Sequence
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Startup Sequence                          │
-└──────────────────────────────────────────────────────────────────┘
-
-1. Parse CLI arguments
-2. Load configuration file
-   └─▶ Validate configuration
-   └─▶ Exit with error if invalid
-3. Initialize logging
-4. Check for existing daemon (PID file)
-   └─▶ Exit if already running
-5. Write PID file
-6. Load persisted state (if exists)
-7. Initialize StateManager
-8. Initialize ProfileSupervisor
-9. Start IPC server
-10. For each enabled profile:
-    └─▶ Spawn ProfileWorker task
-11. Enter main event loop
-```
-
-### 3.2 Reconnection Flow
+### 3.1 Integration Overview
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                      Reconnection Flow                           │
-└──────────────────────────────────────────────────────────────────┘
-
-ProfileWorker detects kubefwd exit
-        │
-        ▼
-┌───────────────────┐
-│ Check exit reason │
-└────────┬──────────┘
-         │
-    ┌────┴────────────────────────────────────┐
-    │                                         │
-    ▼                                         ▼
-┌──────────────┐                    ┌──────────────────┐
-│ Normal exit  │                    │ Error/Crash      │
-│ (code 0)     │                    │ (code != 0)      │
-└──────┬───────┘                    └────────┬─────────┘
-       │                                     │
-       ▼                                     ▼
-┌──────────────────┐              ┌──────────────────┐
-│ Wait for backoff │◀─────────────│ Increment        │
-│                  │              │ failure count    │
-└────────┬─────────┘              └────────┬─────────┘
-         │                                 │
-         │                    ┌────────────┴───────────┐
-         │                    │                        │
-         │                    ▼                        ▼
-         │          ┌──────────────────┐    ┌──────────────────┐
-         │          │ max_attempts     │    │ Under limit      │
-         │          │ exceeded?        │    │                  │
-         │          └────────┬─────────┘    └────────┬─────────┘
-         │                   │                       │
-         │                   ▼                       │
-         │          ┌──────────────────┐             │
-         │          │ Set Failed state │             │
-         │          │ (manual restart  │             │
-         │          │ required)        │             │
-         │          └──────────────────┘             │
-         │                                           │
-         ▼                                           │
-┌──────────────────┐                                 │
-│ Log reconnection │◀────────────────────────────────┘
-│ attempt          │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Spawn new        │
-│ kubefwd process  │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Update state to  │
-│ Running          │
-└──────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Nix Integration Layers                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐      │
+│  │   NixOS Module   │  │  home-manager    │  │  devenv Module   │      │
+│  │                  │  │     Module       │  │                  │      │
+│  │  System service  │  │  User service    │  │  Project service │      │
+│  │  Always running  │  │  Per-user        │  │  Per-shell       │      │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘      │
+│           │                     │                     │                 │
+│           ▼                     ▼                     ▼                 │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                    kubefwd-daemon package                         │  │
+│  │                    (Rust binary + kubefwd)                        │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 4. Nix Integration
-
-### 4.1 Flake Structure
+### 3.2 Flake Structure
 
 ```
 nix-kubefwd-daemon/
 ├── flake.nix
 ├── flake.lock
-├── src/
-│   └── ...
 ├── Cargo.toml
 ├── Cargo.lock
-└── nix/
-    ├── package.nix          # Package derivation
-    ├── module.nix           # NixOS module
-    └── home-module.nix      # home-manager module
+├── src/
+│   ├── main.rs
+│   ├── lib.rs
+│   ├── config.rs
+│   ├── daemon.rs
+│   ├── kubefwd/
+│   │   ├── mod.rs
+│   │   ├── client.rs        # REST API client
+│   │   ├── events.rs        # SSE event handling
+│   │   └── process.rs       # Process supervision
+│   ├── state.rs
+│   ├── ipc/
+│   │   ├── mod.rs
+│   │   ├── server.rs
+│   │   └── protocol.rs
+│   └── cli/
+│       ├── mod.rs
+│       └── commands.rs
+├── nix/
+│   ├── package.nix          # Package derivation
+│   ├── module.nix           # NixOS module
+│   ├── home-module.nix      # home-manager module
+│   └── devenv-module.nix    # devenv module
+└── docs/
+    ├── REQUIREMENTS.md
+    └── ARCHITECTURE.md
 ```
 
-### 4.2 Flake Definition
+### 3.3 Flake Definition
 
 ```nix
 # flake.nix
@@ -632,41 +243,260 @@ nix-kubefwd-daemon/
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, crane }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
         };
+
+        rustToolchain = pkgs.rust-bin.stable.latest.default;
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+
+        # Common build inputs
+        commonArgs = {
+          src = craneLib.cleanCargoSource ./.;
+          buildInputs = with pkgs; [
+            openssl
+          ] ++ lib.optionals stdenv.isDarwin [
+            darwin.apple_sdk.frameworks.Security
+            darwin.apple_sdk.frameworks.SystemConfiguration
+          ];
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+          ];
+        };
+
+        # Build artifacts (dependencies only)
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        # The actual package
+        kubefwd-daemon = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
+        });
       in
       {
         packages = {
-          default = pkgs.callPackage ./nix/package.nix { };
-          kubefwd-daemon = self.packages.${system}.default;
+          default = kubefwd-daemon;
+          inherit kubefwd-daemon;
         };
 
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            (rust-bin.stable.latest.default.override {
-              extensions = [ "rust-src" "rust-analyzer" ];
-            })
-            pkg-config
-            openssl
+        devShells.default = craneLib.devShell {
+          packages = with pkgs; [
+            rust-analyzer
+            cargo-watch
+            kubefwd
           ];
         };
+
+        # Expose the module for devenv
+        lib.mkDevenvModule = import ./nix/devenv-module.nix;
       }
     ) // {
+      # Flake-level outputs (not per-system)
       nixosModules.default = import ./nix/module.nix;
       homeManagerModules.default = import ./nix/home-module.nix;
+
+      # Overlay for easy integration
+      overlays.default = final: prev: {
+        kubefwd-daemon = self.packages.${final.system}.default;
+      };
     };
 }
 ```
 
-### 4.3 NixOS Module
+### 3.4 Devenv Module (Per-Project Isolation)
+
+```nix
+# nix/devenv-module.nix
+{ pkgs, lib, config, ... }:
+
+let
+  cfg = config.services.kubefwd;
+
+  # Generate a deterministic port based on project path
+  projectHash = builtins.hashString "sha256" (toString config.devenv.root);
+  defaultPort = 10000 + (lib.mod (lib.fromHexString (builtins.substring 0 4 projectHash)) 10000);
+
+  # Generate IP prefix (127.X.0.0/16) based on project
+  ipOctet = 1 + (lib.mod (lib.fromHexString (builtins.substring 4 2 projectHash)) 254);
+  defaultIpPrefix = "127.${toString ipOctet}";
+
+  configFile = pkgs.writeText "kubefwd-devenv.yaml" (builtins.toJSON {
+    daemon = {
+      log_level = cfg.logLevel;
+      api_port = cfg.apiPort;
+      ip_prefix = cfg.ipPrefix;
+      socket_path = "${config.devenv.runtime}/kubefwd.sock";
+      state_file = "${config.devenv.state}/kubefwd-state.json";
+    };
+    profiles.devenv = {
+      enabled = true;
+      namespaces = cfg.namespaces;
+      context = cfg.context;
+      kubeconfig = cfg.kubeconfig;
+      labels = cfg.labels;
+      services = cfg.services;
+    };
+  });
+in
+{
+  options.services.kubefwd = {
+    enable = lib.mkEnableOption "kubefwd port forwarding";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.kubefwd-daemon;
+      description = "The kubefwd-daemon package to use";
+    };
+
+    namespaces = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ "default" ];
+      description = "Kubernetes namespaces to forward";
+      example = [ "development" "shared-services" ];
+    };
+
+    context = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Kubernetes context to use (defaults to current)";
+    };
+
+    kubeconfig = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Path to kubeconfig file";
+    };
+
+    labels = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Label selectors to filter services";
+      example = [ "app.kubernetes.io/part-of=myapp" ];
+    };
+
+    services = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Specific services to forward (empty = all)";
+      example = [ "api-gateway" "postgres" "redis" ];
+    };
+
+    apiPort = lib.mkOption {
+      type = lib.types.port;
+      default = defaultPort;
+      description = "Port for kubefwd REST API (auto-generated for isolation)";
+    };
+
+    ipPrefix = lib.mkOption {
+      type = lib.types.str;
+      default = defaultIpPrefix;
+      description = "IP prefix for service addresses (e.g., 127.1 → 127.1.0.x)";
+    };
+
+    logLevel = lib.mkOption {
+      type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
+      default = "info";
+    };
+
+    autoStart = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Automatically start kubefwd when entering devenv";
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    # Add kubefwd-daemon and kubefwd to packages
+    packages = [
+      cfg.package
+      pkgs.kubefwd
+    ];
+
+    # Process-compose service definition
+    processes.kubefwd = {
+      exec = "${cfg.package}/bin/kubefwd-daemon --config ${configFile}";
+      process-compose = {
+        readiness_probe = {
+          http_get = {
+            host = "127.0.0.1";
+            port = cfg.apiPort;
+            path = "/api/v1/status";
+          };
+          initial_delay_seconds = 2;
+          period_seconds = 5;
+        };
+        shutdown = {
+          signal = "SIGTERM";
+          timeout_seconds = 10;
+        };
+      };
+    };
+
+    # Environment variables for the project
+    env = {
+      KUBEFWD_API_URL = "http://127.0.0.1:${toString cfg.apiPort}";
+      KUBEFWD_IP_PREFIX = cfg.ipPrefix;
+    };
+
+    # Shell hook to show status
+    enterShell = lib.mkIf cfg.autoStart ''
+      echo "🔀 kubefwd: Forwarding services from namespaces: ${lib.concatStringsSep ", " cfg.namespaces}"
+      echo "   API: http://127.0.0.1:${toString cfg.apiPort}"
+      echo "   IP Range: ${cfg.ipPrefix}.0.x"
+    '';
+  };
+}
+```
+
+### 3.5 Example Devenv Usage
+
+```nix
+# devenv.nix (in project root)
+{ pkgs, lib, ... }:
+
+{
+  # Import the kubefwd module from the flake
+  imports = [
+    (builtins.getFlake "github:user/nix-kubefwd-daemon").lib.mkDevenvModule
+  ];
+
+  # Or if using flake inputs:
+  # imports = [ inputs.kubefwd-daemon.lib.mkDevenvModule ];
+
+  services.kubefwd = {
+    enable = true;
+    namespaces = [ "development" "shared-infra" ];
+    context = "my-dev-cluster";
+    labels = [ "app.kubernetes.io/part-of=ecommerce" ];
+
+    # Optional: specific services only
+    services = [
+      "api-gateway"
+      "user-service"
+      "postgres"
+      "redis"
+    ];
+  };
+
+  # Other devenv config...
+  languages.rust.enable = true;
+}
+```
+
+### 3.6 NixOS Module (System Service)
 
 ```nix
 # nix/module.nix
@@ -677,21 +507,43 @@ with lib;
 let
   cfg = config.services.kubefwd-daemon;
   settingsFormat = pkgs.formats.yaml { };
+
+  configFile = settingsFormat.generate "kubefwd-daemon.yaml" {
+    daemon = {
+      log_level = cfg.logLevel;
+      socket_path = "/run/kubefwd-daemon/kubefwd.sock";
+      state_file = "/var/lib/kubefwd-daemon/state.json";
+      pid_file = "/run/kubefwd-daemon/kubefwd.pid";
+    };
+    defaults = cfg.defaults;
+    profiles = cfg.profiles;
+  };
 in
 {
   options.services.kubefwd-daemon = {
-    enable = mkEnableOption "kubefwd daemon";
+    enable = mkEnableOption "kubefwd daemon system service";
 
     package = mkOption {
       type = types.package;
       default = pkgs.kubefwd-daemon;
-      description = "The kubefwd-daemon package to use.";
+      description = "The kubefwd-daemon package";
     };
 
-    settings = mkOption {
+    logLevel = mkOption {
+      type = types.enum [ "trace" "debug" "info" "warn" "error" ];
+      default = "info";
+    };
+
+    defaults = mkOption {
       type = settingsFormat.type;
-      default = { };
-      description = "Configuration for kubefwd-daemon.";
+      default = {
+        retry = {
+          initial_delay = "1s";
+          max_delay = "60s";
+          multiplier = 2.0;
+          max_attempts = 0;
+        };
+      };
     };
 
     profiles = mkOption {
@@ -708,39 +560,80 @@ in
             type = types.nullOr types.str;
             default = null;
           };
+          kubeconfig = mkOption {
+            type = types.nullOr types.path;
+            default = null;
+          };
           labels = mkOption {
             type = types.listOf types.str;
             default = [ ];
           };
+          user = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "Run this profile as specific user (for kubeconfig access)";
+          };
         };
       });
       default = { };
+      example = {
+        dev-services = {
+          namespaces = [ "development" ];
+          context = "dev-cluster";
+        };
+      };
     };
   };
 
   config = mkIf cfg.enable {
+    # Ensure kubefwd is available
+    environment.systemPackages = [ pkgs.kubefwd cfg.package ];
+
     systemd.services.kubefwd-daemon = {
-      description = "kubefwd daemon";
+      description = "kubefwd daemon for Kubernetes port forwarding";
       wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
 
       serviceConfig = {
-        Type = "simple";
-        ExecStart = "${cfg.package}/bin/kubefwd-daemon";
+        Type = "notify";
+        ExecStart = "${cfg.package}/bin/kubefwd-daemon --config ${configFile}";
+        ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
         Restart = "on-failure";
         RestartSec = 5;
-      };
 
-      environment = {
-        KUBEFWD_DAEMON_CONFIG = settingsFormat.generate "config.yaml"
-          (cfg.settings // { profiles = cfg.profiles; });
+        # Hardening
+        NoNewPrivileges = false;  # Needs sudo for kubefwd
+        ProtectSystem = "strict";
+        ProtectHome = "read-only";
+        ReadWritePaths = [
+          "/var/lib/kubefwd-daemon"
+          "/run/kubefwd-daemon"
+          "/etc/hosts"  # kubefwd needs this
+        ];
+        RuntimeDirectory = "kubefwd-daemon";
+        StateDirectory = "kubefwd-daemon";
+
+        # Capabilities for /etc/hosts modification
+        AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
+      };
+    };
+
+    # Socket activation for CLI
+    systemd.sockets.kubefwd-daemon = {
+      wantedBy = [ "sockets.target" ];
+      socketConfig = {
+        ListenStream = "/run/kubefwd-daemon/kubefwd.sock";
+        SocketMode = "0660";
+        SocketUser = "root";
+        SocketGroup = "wheel";
       };
     };
   };
 }
 ```
 
-### 4.4 home-manager Module
+### 3.7 home-manager Module (User Service)
 
 ```nix
 # nix/home-module.nix
@@ -751,25 +644,42 @@ with lib;
 let
   cfg = config.services.kubefwd-daemon;
   settingsFormat = pkgs.formats.yaml { };
-  configFile = settingsFormat.generate "kubefwd-daemon.yaml" (
-    cfg.settings // { profiles = cfg.profiles; }
-  );
+
+  runtimeDir = config.xdg.runtimeDir or "/run/user/${toString config.home.uid}";
+  stateDir = "${config.xdg.stateHome}/kubefwd-daemon";
+
+  configFile = settingsFormat.generate "kubefwd-daemon.yaml" {
+    daemon = {
+      log_level = cfg.logLevel;
+      socket_path = "${runtimeDir}/kubefwd-daemon.sock";
+      state_file = "${stateDir}/state.json";
+    };
+    defaults = cfg.defaults;
+    profiles = cfg.profiles;
+  };
 in
 {
   options.services.kubefwd-daemon = {
-    enable = mkEnableOption "kubefwd daemon";
+    enable = mkEnableOption "kubefwd daemon user service";
 
     package = mkOption {
       type = types.package;
       default = pkgs.kubefwd-daemon;
     };
 
-    settings = mkOption {
+    logLevel = mkOption {
+      type = types.enum [ "trace" "debug" "info" "warn" "error" ];
+      default = "info";
+    };
+
+    defaults = mkOption {
       type = settingsFormat.type;
       default = {
-        daemon = {
-          log_level = "info";
-          socket_path = "${config.xdg.runtimeDir}/kubefwd-daemon.sock";
+        retry = {
+          initial_delay = "1s";
+          max_delay = "60s";
+          multiplier = 2.0;
+          max_attempts = 0;
         };
       };
     };
@@ -803,41 +713,52 @@ in
   };
 
   config = mkIf cfg.enable {
-    home.packages = [ cfg.package ];
+    home.packages = [ cfg.package pkgs.kubefwd ];
 
     xdg.configFile."kubefwd-daemon/config.yaml".source = configFile;
 
-    systemd.user.services.kubefwd-daemon = {
+    # Ensure state directory exists
+    home.activation.kubefwdStateDir = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      mkdir -p "${stateDir}"
+    '';
+
+    # Linux: systemd user service
+    systemd.user.services.kubefwd-daemon = mkIf pkgs.stdenv.isLinux {
       Unit = {
         Description = "kubefwd daemon";
-        After = [ "network.target" ];
+        After = [ "network-online.target" ];
+        Wants = [ "network-online.target" ];
       };
 
       Service = {
-        Type = "simple";
-        ExecStart = "${cfg.package}/bin/kubefwd-daemon --config %h/.config/kubefwd-daemon/config.yaml";
+        Type = "notify";
+        ExecStart = "${cfg.package}/bin/kubefwd-daemon --config ${config.xdg.configHome}/kubefwd-daemon/config.yaml";
+        ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
         Restart = "on-failure";
         RestartSec = 5;
       };
 
-      Install = {
-        WantedBy = [ "default.target" ];
-      };
+      Install.WantedBy = [ "default.target" ];
     };
 
-    # macOS launchd support
+    # macOS: launchd agent
     launchd.agents.kubefwd-daemon = mkIf pkgs.stdenv.isDarwin {
       enable = true;
       config = {
+        Label = "com.kubefwd-daemon";
         ProgramArguments = [
           "${cfg.package}/bin/kubefwd-daemon"
           "--config"
           "${config.home.homeDirectory}/.config/kubefwd-daemon/config.yaml"
         ];
         RunAtLoad = true;
-        KeepAlive = true;
+        KeepAlive = {
+          SuccessfulExit = false;
+          Crashed = true;
+        };
         StandardOutPath = "${config.home.homeDirectory}/Library/Logs/kubefwd-daemon.log";
         StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/kubefwd-daemon.error.log";
+        ProcessType = "Background";
       };
     };
   };
@@ -846,197 +767,881 @@ in
 
 ---
 
-## 5. Error Handling
+## 4. Kubefwd REST API Integration
 
-### 5.1 Error Types
-
-```rust
-#[derive(Debug, thiserror::Error)]
-pub enum DaemonError {
-    #[error("Configuration error: {0}")]
-    Config(#[from] ConfigError),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Profile error: {message}")]
-    Profile { name: String, message: String },
-
-    #[error("IPC error: {0}")]
-    Ipc(String),
-
-    #[error("kubefwd process error: {0}")]
-    Kubefwd(String),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("Failed to read config file: {0}")]
-    Read(std::io::Error),
-
-    #[error("Failed to parse config: {0}")]
-    Parse(#[from] serde_yaml::Error),
-
-    #[error("Validation error: {0}")]
-    Validation(String),
-
-    #[error("Profile '{name}' error: {message}")]
-    Profile { name: String, message: String },
-}
-```
-
-### 5.2 Error Recovery Strategies
-
-| Error Type | Recovery Strategy |
-|------------|-------------------|
-| kubefwd crash | Automatic restart with backoff |
-| Config file error | Refuse to reload, keep running with old config |
-| Network error | Retry with exponential backoff |
-| Kubeconfig missing | Mark profile as Failed, log error |
-| IPC connection error | Log and continue (don't crash daemon) |
-| State file corrupt | Initialize fresh state, log warning |
-
----
-
-## 6. Logging
-
-### 6.1 Log Levels
-
-| Level | Usage |
-|-------|-------|
-| ERROR | Unrecoverable errors, profile failures |
-| WARN | Recoverable issues, reconnections |
-| INFO | Profile start/stop, config reload |
-| DEBUG | Detailed operation flow |
-| TRACE | IPC messages, process output |
-
-### 6.2 Log Format
-
-```
-2025-01-15T10:30:42.123Z INFO  [kubefwd_daemon::supervisor] Profile 'dev-services' started (pid: 12345)
-2025-01-15T10:35:15.456Z WARN  [kubefwd_daemon::worker] Profile 'dev-services' kubefwd exited (code: 1), reconnecting in 2s
-2025-01-15T10:35:17.789Z INFO  [kubefwd_daemon::worker] Profile 'dev-services' reconnected successfully
-```
-
-### 6.3 Structured Logging (JSON mode)
-
-```json
-{
-  "timestamp": "2025-01-15T10:30:42.123Z",
-  "level": "INFO",
-  "target": "kubefwd_daemon::supervisor",
-  "message": "Profile started",
-  "profile": "dev-services",
-  "pid": 12345
-}
-```
-
----
-
-## 7. Testing Strategy
-
-### 7.1 Unit Tests
-
-| Component | Test Focus |
-|-----------|------------|
-| ConfigLoader | Parsing, validation, defaults |
-| RetryConfig | Backoff calculation, jitter |
-| StateManager | Serialization, updates, persistence |
-| IPC Protocol | Message encoding/decoding |
-
-### 7.2 Integration Tests
-
-| Test | Description |
-|------|-------------|
-| Daemon lifecycle | Start, stop, restart |
-| Profile management | Enable, disable, status |
-| Reconnection | Simulate kubefwd crash, verify recovery |
-| Config reload | Hot reload with validation |
-| IPC communication | CLI to daemon commands |
-
-### 7.3 Mock kubefwd
-
-For testing, a mock kubefwd binary that can simulate various scenarios:
+### 4.1 API Client Design
 
 ```rust
-// tests/mock_kubefwd.rs
-fn main() {
-    let args: Vec<String> = env::args().collect();
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
-    match env::var("MOCK_BEHAVIOR").as_deref() {
-        Ok("crash_after_5s") => {
-            thread::sleep(Duration::from_secs(5));
-            std::process::exit(1);
+/// kubefwd REST API client
+pub struct KubefwdClient {
+    base_url: String,
+    client: Client,
+}
+
+impl KubefwdClient {
+    pub fn new(api_port: u16) -> Self {
+        Self {
+            base_url: format!("http://127.0.0.1:{}/api/v1", api_port),
+            client: Client::new(),
         }
-        Ok("run_forever") => {
-            loop { thread::sleep(Duration::from_secs(60)); }
+    }
+
+    /// Add a namespace to forward
+    pub async fn add_namespace(&self, req: AddNamespaceRequest) -> Result<NamespaceResponse> {
+        self.client
+            .post(format!("{}/namespaces", self.base_url))
+            .json(&req)
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    /// Remove a namespace
+    pub async fn remove_namespace(&self, namespace: &str) -> Result<()> {
+        self.client
+            .delete(format!("{}/namespaces/{}", self.base_url, namespace))
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    /// List all forwarded services
+    pub async fn list_services(&self) -> Result<Vec<ServiceInfo>> {
+        self.client
+            .get(format!("{}/services", self.base_url))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    /// Get daemon status
+    pub async fn status(&self) -> Result<StatusResponse> {
+        self.client
+            .get(format!("{}/status", self.base_url))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    /// Health check
+    pub async fn health(&self) -> Result<bool> {
+        let resp = self.client
+            .get(format!("{}/health", self.base_url))
+            .send()
+            .await?;
+        Ok(resp.status().is_success())
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddNamespaceRequest {
+    pub namespace: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ServiceInfo {
+    pub name: String,
+    pub namespace: String,
+    pub local_ip: String,
+    pub local_port: u16,
+    pub cluster_ip: String,
+    pub cluster_port: u16,
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StatusResponse {
+    pub running: bool,
+    pub uptime_seconds: u64,
+    pub namespaces: Vec<String>,
+    pub services_count: usize,
+    pub reconnect_count: u64,
+}
+```
+
+### 4.2 SSE Event Listener
+
+```rust
+use futures::StreamExt;
+use reqwest_eventsource::{Event, EventSource};
+use tokio::sync::mpsc;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum KubefwdEvent {
+    ServiceUp {
+        service: String,
+        namespace: String,
+        local_ip: String,
+        local_port: u16,
+    },
+    ServiceDown {
+        service: String,
+        namespace: String,
+        reason: String,
+    },
+    Reconnecting {
+        service: String,
+        namespace: String,
+        attempt: u32,
+    },
+    Reconnected {
+        service: String,
+        namespace: String,
+    },
+    Error {
+        message: String,
+        service: Option<String>,
+    },
+    NamespaceAdded {
+        namespace: String,
+    },
+    NamespaceRemoved {
+        namespace: String,
+    },
+}
+
+pub struct EventListener {
+    api_port: u16,
+    event_tx: mpsc::Sender<KubefwdEvent>,
+}
+
+impl EventListener {
+    pub fn new(api_port: u16, event_tx: mpsc::Sender<KubefwdEvent>) -> Self {
+        Self { api_port, event_tx }
+    }
+
+    pub async fn run(&self, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
+        let url = format!("http://127.0.0.1:{}/api/v1/events", self.api_port);
+
+        loop {
+            let mut es = EventSource::get(&url);
+
+            loop {
+                tokio::select! {
+                    event = es.next() => {
+                        match event {
+                            Some(Ok(Event::Message(msg))) => {
+                                if let Ok(event) = serde_json::from_str::<KubefwdEvent>(&msg.data) {
+                                    let _ = self.event_tx.send(event).await;
+                                }
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!("SSE error: {}, reconnecting...", e);
+                                break; // Reconnect
+                            }
+                            None => break, // Stream ended
+                            _ => {}
+                        }
+                    }
+                    _ = shutdown.recv() => {
+                        return Ok(());
+                    }
+                }
+            }
+
+            // Wait before reconnecting
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        Ok("exit_immediately") => {
-            std::process::exit(0);
+    }
+}
+```
+
+### 4.3 Process Supervisor
+
+```rust
+use std::process::{Child, Command, Stdio};
+use tokio::sync::broadcast;
+
+pub struct KubefwdSupervisor {
+    api_port: u16,
+    ip_prefix: String,
+    process: Option<Child>,
+    retry_config: RetryConfig,
+}
+
+impl KubefwdSupervisor {
+    pub fn new(api_port: u16, ip_prefix: String, retry_config: RetryConfig) -> Self {
+        Self {
+            api_port,
+            ip_prefix,
+            process: None,
+            retry_config,
         }
-        _ => {
-            // Default: run for 60s then exit cleanly
-            thread::sleep(Duration::from_secs(60));
+    }
+
+    /// Start kubefwd in idle + API mode
+    pub async fn start(&mut self) -> Result<()> {
+        let child = Command::new("sudo")
+            .args([
+                "-E",
+                "kubefwd",
+                "--api",
+                "--api-port", &self.api_port.to_string(),
+                "--ip-prefix", &self.ip_prefix,
+                // Idle mode: no namespaces specified, add via API
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        self.process = Some(child);
+
+        // Wait for API to be ready
+        self.wait_for_api().await?;
+
+        Ok(())
+    }
+
+    /// Wait for kubefwd API to become available
+    async fn wait_for_api(&self) -> Result<()> {
+        let client = KubefwdClient::new(self.api_port);
+
+        for attempt in 1..=30 {
+            match client.health().await {
+                Ok(true) => return Ok(()),
+                _ => {
+                    if attempt == 30 {
+                        return Err(anyhow!("kubefwd API failed to start"));
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
         }
+
+        Ok(())
+    }
+
+    /// Stop kubefwd gracefully
+    pub async fn stop(&mut self) -> Result<()> {
+        if let Some(ref mut child) = self.process {
+            // Send SIGTERM
+            unsafe {
+                libc::kill(child.id() as i32, libc::SIGTERM);
+            }
+
+            // Wait for graceful shutdown
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                tokio::task::spawn_blocking({
+                    let mut child = self.process.take().unwrap();
+                    move || child.wait()
+                })
+            ).await??;
+        }
+
+        Ok(())
+    }
+
+    /// Monitor process and restart on crash
+    pub async fn supervise(&mut self, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
+        let mut backoff = self.retry_config.initial_delay;
+        let mut consecutive_failures = 0;
+
+        loop {
+            // Start kubefwd if not running
+            if self.process.is_none() {
+                match self.start().await {
+                    Ok(()) => {
+                        tracing::info!("kubefwd started (API port: {})", self.api_port);
+                        backoff = self.retry_config.initial_delay;
+                        consecutive_failures = 0;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to start kubefwd: {}", e);
+                        consecutive_failures += 1;
+                    }
+                }
+            }
+
+            // Wait for process exit or shutdown signal
+            tokio::select! {
+                exit_status = self.wait_for_exit() => {
+                    tracing::warn!("kubefwd exited: {:?}", exit_status);
+                    self.process = None;
+                    consecutive_failures += 1;
+
+                    // Check max attempts
+                    if self.retry_config.max_attempts > 0
+                        && consecutive_failures >= self.retry_config.max_attempts
+                    {
+                        return Err(anyhow!("Max restart attempts exceeded"));
+                    }
+
+                    // Wait with backoff
+                    tracing::info!("Restarting kubefwd in {:?}", backoff);
+                    tokio::time::sleep(backoff).await;
+
+                    // Increase backoff
+                    backoff = (backoff.mul_f64(self.retry_config.multiplier))
+                        .min(self.retry_config.max_delay);
+                }
+                _ = shutdown.recv() => {
+                    tracing::info!("Shutdown signal received, stopping kubefwd");
+                    self.stop().await?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    async fn wait_for_exit(&mut self) -> Option<std::process::ExitStatus> {
+        if let Some(ref mut child) = self.process {
+            // Poll process status
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => return Some(status),
+                    Ok(None) => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    Err(_) => return None,
+                }
+            }
+        }
+        None
     }
 }
 ```
 
 ---
 
-## 8. Security Considerations
+## 5. Configuration Schema
 
-### 8.1 Privilege Model
+### 5.1 Full Configuration (YAML)
 
+```yaml
+# ~/.config/kubefwd-daemon/config.yaml
+
+daemon:
+  log_level: info                      # trace, debug, info, warn, error
+  log_file: ~/.local/log/kubefwd-daemon.log
+  socket_path: /run/user/1000/kubefwd-daemon.sock
+  state_file: ~/.local/state/kubefwd-daemon/state.json
+
+  # kubefwd process settings
+  kubefwd:
+    api_port: 9898                     # REST API port
+    ip_prefix: "127.1"                 # IP range for services (127.1.0.x)
+
+defaults:
+  retry:
+    initial_delay: 1s
+    max_delay: 60s
+    multiplier: 2.0
+    max_attempts: 0                    # 0 = infinite
+
+profiles:
+  # Development environment
+  dev:
+    enabled: true
+    context: dev-cluster
+    kubeconfig: ~/.kube/config
+    namespaces:
+      - development
+      - shared-services
+    labels:
+      - "environment=development"
+    services: []                        # Empty = all services
+
+  # Staging (disabled by default)
+  staging:
+    enabled: false
+    context: staging-cluster
+    namespaces:
+      - staging
+    labels:
+      - "app.kubernetes.io/part-of=myapp"
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Privilege Separation                         │
-└─────────────────────────────────────────────────────────────────┘
 
-   User privileges                Root privileges (via sudo)
-   ────────────────               ────────────────────────────
+### 5.2 Configuration Types (Rust)
 
-   ┌─────────────────┐            ┌─────────────────┐
-   │  kubefwd-ctl    │            │                 │
-   │  (CLI)          │            │                 │
-   └────────┬────────┘            │                 │
-            │                     │                 │
-            ▼                     │                 │
-   ┌─────────────────┐            │                 │
-   │  kubefwd-daemon │            │                 │
-   │  (main process) │            │                 │
-   │                 │────sudo───▶│  kubefwd       │
-   │  - config       │            │  (child proc)  │
-   │  - state        │            │                 │
-   │  - IPC          │            │  - /etc/hosts  │
-   │  - logging      │            │  - port-forward│
-   └─────────────────┘            └─────────────────┘
+```rust
+use std::path::PathBuf;
+use std::time::Duration;
+use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Config {
+    pub daemon: DaemonConfig,
+    #[serde(default)]
+    pub defaults: DefaultsConfig,
+    #[serde(default)]
+    pub profiles: HashMap<String, ProfileConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DaemonConfig {
+    #[serde(default = "default_log_level")]
+    pub log_level: LogLevel,
+    pub log_file: Option<PathBuf>,
+    pub socket_path: PathBuf,
+    pub state_file: PathBuf,
+    #[serde(default)]
+    pub kubefwd: KubefwdConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KubefwdConfig {
+    #[serde(default = "default_api_port")]
+    pub api_port: u16,
+    #[serde(default = "default_ip_prefix")]
+    pub ip_prefix: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DefaultsConfig {
+    #[serde(default)]
+    pub retry: RetryConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetryConfig {
+    #[serde(with = "humantime_serde", default = "default_initial_delay")]
+    pub initial_delay: Duration,
+    #[serde(with = "humantime_serde", default = "default_max_delay")]
+    pub max_delay: Duration,
+    #[serde(default = "default_multiplier")]
+    pub multiplier: f64,
+    #[serde(default)]
+    pub max_attempts: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProfileConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub context: Option<String>,
+    pub kubeconfig: Option<PathBuf>,
+    pub namespaces: Vec<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub services: Vec<String>,
+    pub retry: Option<RetryConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
+
+// Default value functions
+fn default_log_level() -> LogLevel { LogLevel::Info }
+fn default_api_port() -> u16 { 9898 }
+fn default_ip_prefix() -> String { "127.1".to_string() }
+fn default_initial_delay() -> Duration { Duration::from_secs(1) }
+fn default_max_delay() -> Duration { Duration::from_secs(60) }
+fn default_multiplier() -> f64 { 2.0 }
+fn default_true() -> bool { true }
 ```
-
-### 8.2 Security Measures
-
-1. **Unix Socket Permissions**: IPC socket restricted to user (0600)
-2. **PID File**: Prevents multiple instances
-3. **No Secrets in Logs**: Kubeconfig paths redacted in debug logs
-4. **Minimal sudo Usage**: Only kubefwd child process runs with sudo
-5. **Config File Permissions**: Warn if config is world-readable
 
 ---
 
-## 9. Future Considerations (v2.0+)
+## 6. State Management
 
-Items explicitly deferred to future versions:
+### 6.1 State Structure
 
-1. **Metrics Endpoint**: Prometheus-compatible /metrics endpoint
-2. **Desktop Notifications**: D-Bus/macOS notifications on state changes
-3. **Web UI**: Local web interface for status and control
-4. **Profile Dependencies**: Start profiles in order based on dependencies
-5. **Health Probes**: Active health checking via TCP connect
+```rust
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonState {
+    pub version: u32,
+    pub started_at: DateTime<Utc>,
+    pub kubefwd_pid: Option<u32>,
+    pub kubefwd_status: KubefwdStatus,
+    pub profiles: HashMap<String, ProfileState>,
+    pub services: HashMap<String, ServiceState>,
+    pub metrics: Metrics,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum KubefwdStatus {
+    Starting,
+    Running,
+    Stopping,
+    Stopped,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileState {
+    pub enabled: bool,
+    pub namespaces_active: Vec<String>,
+    pub last_sync: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceState {
+    pub name: String,
+    pub namespace: String,
+    pub local_ip: String,
+    pub local_port: u16,
+    pub status: ServiceStatus,
+    pub connected_at: Option<DateTime<Utc>>,
+    pub reconnect_count: u64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum ServiceStatus {
+    Connecting,
+    Connected,
+    Reconnecting,
+    Failed,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Metrics {
+    pub total_reconnects: u64,
+    pub kubefwd_restarts: u64,
+    pub uptime_seconds: u64,
+    pub services_forwarded: u64,
+}
+```
+
+---
+
+## 7. CLI Design
+
+### 7.1 Command Structure
+
+```
+kubefwd-ctl [OPTIONS] <COMMAND>
+
+Commands:
+  start              Start the daemon
+  stop               Stop the daemon
+  restart            Restart the daemon
+  reload             Reload configuration (hot-reload)
+  status             Show daemon and service status
+  services           List forwarded services
+  logs               View daemon logs
+
+  profile <CMD>      Manage profiles
+    list             List all profiles
+    enable <name>    Enable a profile
+    disable <name>   Disable a profile
+    sync <name>      Force sync profile to kubefwd
+
+  namespace <CMD>    Manage namespaces directly
+    add <ns>         Add namespace to forwarding
+    remove <ns>      Remove namespace from forwarding
+    list             List active namespaces
+
+Options:
+  -c, --config <PATH>    Config file path
+  -s, --socket <PATH>    Unix socket path
+  -j, --json             Output as JSON
+  -v, --verbose          Increase verbosity
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### 7.2 Status Output
+
+```
+$ kubefwd-ctl status
+
+kubefwd-daemon v0.1.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Daemon:     ● Running (uptime: 2d 4h 12m)
+kubefwd:    ● Running (pid: 12345, API: http://127.0.0.1:9898)
+IP Range:   127.1.0.x
+
+Profiles (2 active, 1 disabled):
+┌─────────────┬──────────┬─────────────────────┬────────────┐
+│ Profile     │ Status   │ Namespaces          │ Services   │
+├─────────────┼──────────┼─────────────────────┼────────────┤
+│ dev         │ ● Active │ development, shared │ 12         │
+│ staging     │ ○ Disabled│ -                  │ -          │
+│ prod-ro     │ ● Active │ production          │ 5          │
+└─────────────┴──────────┴─────────────────────┴────────────┘
+
+Services (17 total):
+┌─────────────────────┬─────────────┬────────────────┬──────────┐
+│ Service             │ Namespace   │ Local Address  │ Status   │
+├─────────────────────┼─────────────┼────────────────┼──────────┤
+│ api-gateway         │ development │ 127.1.0.1:8080 │ ● Up     │
+│ user-service        │ development │ 127.1.0.2:8080 │ ● Up     │
+│ postgres            │ shared      │ 127.1.0.3:5432 │ ● Up     │
+│ redis               │ shared      │ 127.1.0.4:6379 │ ◐ Reconn │
+│ ...                 │ ...         │ ...            │ ...      │
+└─────────────────────┴─────────────┴────────────────┴──────────┘
+
+Metrics:
+  Total reconnects: 7
+  kubefwd restarts: 1
+  Last reconnect: redis @ 2025-01-15 10:30:42 UTC
+```
+
+---
+
+## 8. Testing Strategy
+
+### 8.1 Test Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Test Layers                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                    Integration Tests                        │ │
+│  │  • Full daemon lifecycle                                    │ │
+│  │  • CLI ↔ Daemon ↔ Mock kubefwd                            │ │
+│  │  • Config reload scenarios                                  │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                    Component Tests                          │ │
+│  │  • REST client against mock server                          │ │
+│  │  • SSE event parsing                                        │ │
+│  │  • State persistence                                        │ │
+│  │  • IPC protocol                                             │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                      Unit Tests                             │ │
+│  │  • Config parsing & validation                              │ │
+│  │  • Backoff calculation                                      │ │
+│  │  • State transitions                                        │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 8.2 Mock kubefwd Server
+
+```rust
+// tests/mock_kubefwd.rs
+use axum::{routing::{get, post, delete}, Router, Json};
+use tokio::sync::broadcast;
+
+/// Mock kubefwd REST API for testing
+pub struct MockKubefwd {
+    port: u16,
+    namespaces: Arc<RwLock<HashSet<String>>>,
+    services: Arc<RwLock<Vec<MockService>>>,
+    event_tx: broadcast::Sender<String>,
+}
+
+impl MockKubefwd {
+    pub fn new(port: u16) -> Self {
+        let (event_tx, _) = broadcast::channel(100);
+        Self {
+            port,
+            namespaces: Arc::new(RwLock::new(HashSet::new())),
+            services: Arc::new(RwLock::new(Vec::new())),
+            event_tx,
+        }
+    }
+
+    pub async fn run(&self) -> Result<()> {
+        let app = Router::new()
+            .route("/api/v1/status", get(Self::status))
+            .route("/api/v1/health", get(Self::health))
+            .route("/api/v1/namespaces", post(Self::add_namespace))
+            .route("/api/v1/namespaces/:ns", delete(Self::remove_namespace))
+            .route("/api/v1/services", get(Self::list_services))
+            .route("/api/v1/events", get(Self::events))
+            .with_state(self.clone());
+
+        axum::Server::bind(&format!("127.0.0.1:{}", self.port).parse()?)
+            .serve(app.into_make_service())
+            .await?;
+
+        Ok(())
+    }
+
+    /// Simulate service reconnection
+    pub async fn simulate_reconnect(&self, service: &str) {
+        let event = serde_json::json!({
+            "type": "reconnecting",
+            "service": service,
+            "namespace": "default",
+            "attempt": 1
+        });
+        let _ = self.event_tx.send(event.to_string());
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let event = serde_json::json!({
+            "type": "reconnected",
+            "service": service,
+            "namespace": "default"
+        });
+        let _ = self.event_tx.send(event.to_string());
+    }
+
+    /// Simulate crash (for supervisor testing)
+    pub async fn simulate_crash(&self) {
+        // Server will stop, supervisor should restart
+        std::process::exit(1);
+    }
+}
+```
+
+### 8.3 Integration Test Example
+
+```rust
+#[tokio::test]
+async fn test_daemon_lifecycle() {
+    // Start mock kubefwd
+    let mock = MockKubefwd::new(19898);
+    let mock_handle = tokio::spawn(mock.run());
+
+    // Create test config
+    let config = Config {
+        daemon: DaemonConfig {
+            kubefwd: KubefwdConfig {
+                api_port: 19898,
+                ip_prefix: "127.99".to_string(),
+            },
+            ..Default::default()
+        },
+        profiles: hashmap! {
+            "test".to_string() => ProfileConfig {
+                enabled: true,
+                namespaces: vec!["default".to_string()],
+                ..Default::default()
+            }
+        },
+        ..Default::default()
+    };
+
+    // Start daemon
+    let daemon = Daemon::new(config).await.unwrap();
+    let daemon_handle = tokio::spawn(daemon.run());
+
+    // Wait for startup
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Verify via CLI
+    let status = kubefwd_ctl::status(&socket_path).await.unwrap();
+    assert_eq!(status.kubefwd_status, KubefwdStatus::Running);
+    assert!(status.profiles["test"].enabled);
+
+    // Test reconnection event handling
+    mock.simulate_reconnect("test-service").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let status = kubefwd_ctl::status(&socket_path).await.unwrap();
+    assert_eq!(status.metrics.total_reconnects, 1);
+
+    // Shutdown
+    daemon.shutdown().await.unwrap();
+}
+```
+
+### 8.4 Nix Integration Test
+
+```nix
+# nix/tests/integration.nix
+{ pkgs, ... }:
+
+pkgs.nixosTest {
+  name = "kubefwd-daemon-integration";
+
+  nodes.machine = { config, pkgs, ... }: {
+    imports = [ ../module.nix ];
+
+    services.kubefwd-daemon = {
+      enable = true;
+      profiles.test = {
+        namespaces = [ "default" ];
+      };
+    };
+
+    # Mock kubernetes for testing
+    services.k3s.enable = true;
+  };
+
+  testScript = ''
+    machine.wait_for_unit("kubefwd-daemon.service")
+    machine.wait_for_open_port(9898)
+
+    # Check status
+    result = machine.succeed("kubefwd-ctl status --json")
+    status = json.loads(result)
+    assert status["kubefwd_status"] == "Running"
+
+    # Check service is forwarded
+    machine.succeed("curl -f http://127.1.0.1:80 || true")
+  '';
+}
+```
+
+---
+
+## 9. Security Considerations
+
+### 9.1 Privilege Model
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Privilege Separation                          │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│   User Space (unprivileged)           Root Space (privileged)        │
+│   ─────────────────────────           ───────────────────────        │
+│                                                                       │
+│   ┌─────────────────────┐             ┌─────────────────────┐        │
+│   │   kubefwd-ctl       │             │                     │        │
+│   │   (CLI binary)      │             │                     │        │
+│   └──────────┬──────────┘             │                     │        │
+│              │ IPC (Unix socket)      │                     │        │
+│              ▼                        │                     │        │
+│   ┌─────────────────────┐             │                     │        │
+│   │   kubefwd-daemon    │             │                     │        │
+│   │                     │  sudo -E    │   kubefwd           │        │
+│   │   • Config mgmt     │────────────▶│   (child process)   │        │
+│   │   • State tracking  │             │                     │        │
+│   │   • REST client     │◀───HTTP────▶│   • /etc/hosts mod  │        │
+│   │   • SSE listener    │             │   • Port binding    │        │
+│   │   • IPC server      │             │   • K8s API access  │        │
+│   └─────────────────────┘             └─────────────────────┘        │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 Security Measures
+
+| Measure | Implementation |
+|---------|----------------|
+| Socket permissions | `chmod 0600` on Unix socket |
+| Config file permissions | Warn if world-readable |
+| Credential handling | Never log kubeconfig contents |
+| Process isolation | kubefwd runs as separate process |
+| API binding | localhost only (127.0.0.1) |
 
 ---
 
 ## 10. Revision History
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-01-15 | Initial | Initial architecture |
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2025-01-15 | Initial architecture (multi-process) |
+| 2.0 | 2025-01-15 | Revised for REST API approach, added devenv integration, isolation strategies |
