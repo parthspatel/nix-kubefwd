@@ -15,6 +15,47 @@ Requirements gathering and design with iterative review loops. Produces artifact
 - Planning infrastructure or platform capabilities
 - Any project needing systematic requirements and design
 
+## Role Boundaries
+
+| Activity | Claude | User |
+|----------|--------|------|
+| Draft requirements | ✅ Proposes structure, asks questions | Provides domain knowledge |
+| Write user stories | ✅ Drafts based on discussion | Reviews, corrects, approves |
+| Technical decisions | ✅ Presents options with trade-offs | Selects option, approves |
+| Create diagrams | ✅ Generates via `diagrams-kroki` | Reviews for accuracy |
+| Approval gates | ✅ Summarizes, asks for approval | Approves / requests changes |
+
+## Iteration Limits
+
+Each phase allows **max 3 iterations** before escalation:
+
+| Iteration | Action |
+|-----------|--------|
+| 1st | Initial draft → user feedback |
+| 2nd | Revised draft → user feedback |
+| 3rd | Final revision → must approve or descope |
+| Blocked | Escalate: "Requirements may be infeasible. Options: (A) Reduce scope, (B) Accept risks, (C) Abandon" |
+
+## Artifacts Location
+
+All outputs go to `./planning/{YYYYMMDD}_{project}/`:
+
+```
+./planning/20260116_my-service/
+├── PROJECT.md                    # Status dashboard
+├── requirements/
+│   ├── PRODUCT-REQUIREMENTS.md   # Phase 1 output
+│   ├── TECHNICAL-REQUIREMENTS.md # Phase 2 output
+│   └── TRACEABILITY.md           # Phase 3 output
+├── diagrams/                     # Phase 4-5 outputs
+│   ├── architecture/
+│   ├── behavior/
+│   └── data/
+└── design/
+    ├── ARCHITECTURE.md           # Phase 5 output
+    └── INTERFACES.md             # Phase 6 output
+```
+
 ## Workflow Overview
 
 ```

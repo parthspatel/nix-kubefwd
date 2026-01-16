@@ -43,31 +43,35 @@ secrets/
 ## Build Commands
 
 ```bash
-# Basic build
-podman build -t myapp:latest .
+# Development build (latest ok for dev)
+podman build -t myapp:dev .
 
-# With build args
-podman build --build-arg VERSION=$(git describe --tags) -t myapp:v1.0 .
+# Versioned build (use for staging/prod)
+VERSION=$(git describe --tags --always)
+podman build --build-arg VERSION=${VERSION} -t myapp:${VERSION} .
 
-# Multi-platform
-podman build --platform linux/amd64,linux/arm64 -t myapp:latest .
+# Multi-platform versioned
+podman build --platform linux/amd64,linux/arm64 -t myapp:${VERSION} .
 ```
 
 ## Run Commands
 
 ```bash
-# Basic run
-podman run -d --name myapp -p 8080:8080 myapp:latest
+# Development
+podman run -d --name myapp -p 8080:8080 myapp:dev
+
+# Production (always use version tag)
+podman run -d --name myapp -p 8080:8080 myapp:v1.2.3
 
 # With environment
-podman run -d --name myapp --env-file .env -p 8080:8080 myapp:latest
+podman run -d --name myapp --env-file .env -p 8080:8080 myapp:v1.2.3
 
 # With secrets
 podman secret create db_pass ./secrets/db_password.txt
-podman run -d --secret db_pass,type=env,target=DB_PASSWORD myapp:latest
+podman run -d --secret db_pass,type=env,target=DB_PASSWORD myapp:v1.2.3
 
 # With volume
-podman run -d -v myapp_data:/data:Z myapp:latest
+podman run -d -v myapp_data:/data:Z myapp:v1.2.3
 ```
 
 ## Compose
@@ -120,7 +124,8 @@ Description=My App
 After=network-online.target
 
 [Container]
-Image=myapp:latest
+# Use versioned tag, not :latest
+Image=ghcr.io/org/myapp:v1.2.3
 PublishPort=8080:8080
 Environment=APP_ENV=production
 Secret=db_pass,type=env,target=DB_PASSWORD

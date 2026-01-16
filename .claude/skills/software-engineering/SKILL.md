@@ -17,6 +17,45 @@ Before starting, ensure you have:
 
 If missing, run `product-development` skill first.
 
+## Role Boundaries
+
+| Activity | Claude | User |
+|----------|--------|------|
+| Scaffold code | ✅ Creates structure, stubs | Reviews structure |
+| Write tests | ✅ Implements test cases | Reviews coverage |
+| Implement code | ✅ Writes implementation | Reviews, approves |
+| Debug failures | ✅ Analyzes, proposes fixes | Confirms direction |
+| Approval gates | ✅ Shows status, asks | Approves / requests changes |
+
+## Iteration Limits
+
+| Loop | Max Iterations | Escalation |
+|------|----------------|------------|
+| Test coverage review | 3 | "Coverage target may be unrealistic" |
+| Red-Green-Refactor | 5 per component | "Component may need redesign" |
+| Fix-Retest (simulation) | 3 | "Architecture may have fundamental issues" |
+
+**Escalation options**: (A) Accept current state, (B) Reduce scope, (C) Return to `product-development` for redesign
+
+## Artifacts Location
+
+Implementation outputs go to project root (alongside planning):
+
+```
+project/
+├── planning/           # From product-development
+├── src/                # Phase 1: scaffolding
+│   └── {modules}/
+├── tests/              # Phase 2: test files
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+├── flake.nix           # From nix-devenv
+├── Containerfile       # From podman-deploy
+├── .github/workflows/  # From github-actions-ci
+└── docs/               # From sphinx-docs
+```
+
 ## Workflow Overview
 
 ```
