@@ -1,38 +1,55 @@
 ---
 name: product-development
-description: Guides full product development lifecycle from requirements through implementation. Use when building new features, services, CLI tools, APIs, or infrastructure. Covers product requirements, technical design, architecture, testing, and implementation with user approval gates at each phase.
+description: Guides product development from requirements through design specifications. Covers product requirements, technical requirements, architecture, and interface contracts with iterative review loops. Use when planning new features, services, CLI tools, APIs, or infrastructure. Run software-engineering skill after to implement.
 ---
 
 # Product Development Workflow
 
-A structured methodology for building software products with user collaboration at every phase.
+Requirements gathering and design with iterative review loops. Produces artifacts for implementation.
 
 ## When to Use
 
-- Building new backend services, APIs, or microservices
-- Creating CLI tools or developer utilities
-- Developing frontend applications or components
-- Designing infrastructure or platform capabilities
-- Any feature requiring systematic requirements gathering and design
+- Planning new backend services, APIs, or microservices
+- Designing CLI tools or developer utilities
+- Architecting frontend applications or components
+- Planning infrastructure or platform capabilities
+- Any project needing systematic requirements and design
 
 ## Workflow Overview
 
 ```
-Phase 1: Product Requirements    → User Approval Required
-Phase 2: Technical Requirements  → User Approval Required
-Phase 3: Requirements Integration → User Approval Required
-Phase 4: Diagrams & Artifacts    → User Approval Required
-Phase 5: Architecture & Design   → User Approval Required
-Phase 6: Interface Contracts     → User Approval Required
-Phase 7: Code Scaffolding        → User Approval Required
-Phase 8: Test Development        → User Approval Required
-Phase 9: Implementation          → User Approval Required
-Phase 10: Simulation Testing     → User Approval Required (if applicable)
+┌─────────────────────────────────────────────────────────────────┐
+│                    PRODUCT DEVELOPMENT                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Phase 1: Product Requirements ←─── Clarify Loop ──→ Approved   │
+│                                                                 │
+│  Phase 2: Technical Requirements ←─ Clarify Loop ──→ Approved   │
+│                                                                 │
+│  Phase 3: Requirements Integration ← Review Loop ──→ Approved   │
+│                    │                     ▲                      │
+│                    └─────────────────────┘                      │
+│                    (gaps found → back to Phase 1 or 2)          │
+│                                                                 │
+│  Phase 4: Diagrams & Artifacts ←──── Review Loop ──→ Approved   │
+│                                                                 │
+│  Phase 5: Architecture & Design ←─── Review Loop ──→ Approved   │
+│                    │                     ▲                      │
+│                    └─────────────────────┘                      │
+│                    (issues found → back to earlier phase)       │
+│                                                                 │
+│  Phase 6: Interface Contracts ←───── Review Loop ──→ Approved   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    Run `software-engineering` skill
+                    to implement the design
 ```
 
 ## Product Type Guides
 
-Select the appropriate guide based on what you're building:
+Select based on what you're building:
 
 - **Backend Services/APIs**: See [product-types/BACKEND.md](product-types/BACKEND.md)
 - **CLI Tools**: See [product-types/CLI.md](product-types/CLI.md)
@@ -41,252 +58,328 @@ Select the appropriate guide based on what you're building:
 
 ## Companion Skills
 
-This workflow uses standalone skills for specialized tooling:
+| Task | Skill | When |
+|------|-------|------|
+| Create diagrams | `diagrams-kroki` | Phases 4-5 |
+| **Implement design** | `software-engineering` | After Phase 6 |
+| Setup environment | `nix-devenv` | Before implementation |
+| Documentation | `sphinx-docs` | Throughout |
 
-| Phase | Skill | Purpose |
-|-------|-------|---------|
-| 4-5 | `diagrams-kroki` | UML, C4, sequence, state, ERD diagrams |
-| 7+ | `nix-devenv` | Reproducible dev environments, secrets |
-| 9 | `podman-deploy` | Container builds, Compose, Quadlet |
-| 9 | `github-actions-ci` | CI/CD pipelines, releases |
-| All | `sphinx-docs` | Project documentation |
+## Planning Structure
 
-### Planning Structure (Built-in)
-
-See [planning/STRUCTURE.md](planning/STRUCTURE.md) for epic/story/task templates.
+See [planning/STRUCTURE.md](planning/STRUCTURE.md) for templates.
 
 ```
 ./planning/{YYYYMMDD}_{project}/
-├── PROJECT.md                    # Status & overview
-├── requirements/                 # Phase 1-3 outputs
-├── diagrams/                     # Phase 4-5 outputs
-├── design/                       # Phase 5-6 outputs
-└── epics/{E###}_{name}/
-    └── stories/{S###}_{name}/
-        └── tasks/{T###}_{name}.md
+├── PROJECT.md              # Status & overview
+├── requirements/           # Phase 1-3 outputs
+├── diagrams/               # Phase 4-5 outputs
+├── design/                 # Phase 5-6 outputs
+└── epics/                  # Work breakdown
 ```
-
-### UI Design (Built-in)
-
-See [design/FIGMA.md](design/FIGMA.md) for GUI/TUI design standards.
-
-## Phase Execution Pattern
-
-For each phase, follow this pattern:
-
-### 1. Present Options to User
-
-Always present decisions with this format:
-
-```markdown
-### Decision: [Decision Name]
-
-| Option | Description | Pros | Cons | User Impact |
-|--------|-------------|------|------|-------------|
-| **Option A (Recommended)** | [Description] | [Pros] | [Cons] | [Impact] |
-| Option B | [Description] | [Pros] | [Cons] | [Impact] |
-| Option C | [Description] | [Pros] | [Cons] | [Impact] |
-
-**Recommendation**: Option A because [reasoning tied to user expectations]
-```
-
-### 2. Wait for User Approval
-
-Before proceeding to the next phase:
-- Summarize all decisions made
-- Present artifacts created
-- Ask explicitly: "Do you approve this phase? Any changes needed?"
-- Do NOT proceed until user confirms
-
-### 3. Document Decisions
-
-Track all decisions in a running summary accessible to the user.
 
 ---
 
-## Phase Details
-
-### Phase 1: Product Requirements
-
-See [phases/01-PRODUCT-REQUIREMENTS.md](phases/01-PRODUCT-REQUIREMENTS.md)
+## Phase 1: Product Requirements
 
 **Goal**: Define WHO uses the product and WHAT they expect.
 
-**Key Activities**:
-- Identify user personas and their goals
-- Write user stories: "As a [X], I expect to [Y] so that [Z]"
-- Define product boundaries and constraints
-- Establish success criteria
+### Clarify Loop
 
-**Critical Reflection Questions**:
-- Who is NOT a user? What are we explicitly excluding?
-- What happens when the user's expectation isn't met?
+```
+Draft Requirements → Review with User → Gaps/Issues?
+        ▲                                    │
+        │              Yes                   │ No
+        └────────────────┘                   ▼
+                                         Approved
+```
+
+### Key Activities
+
+1. **Identify personas**: Who are the users? What are their goals?
+2. **Write user stories**: "As a [X], I expect to [Y] so that [Z]"
+3. **Define boundaries**: What's in/out of scope?
+4. **Success criteria**: How do we know it works?
+
+### Critical Questions
+
+- Who is NOT a user?
+- What happens when expectations aren't met?
 - Are there conflicting user needs?
+
+### Approval Gate
+
+```markdown
+## Phase 1: Product Requirements
+
+**Personas Defined**: X
+**User Stories**: Y
+**Boundaries**: Documented
+
+**Gaps or Issues?**
+- [ ] Any personas missing?
+- [ ] Any user stories unclear?
+- [ ] Scope concerns?
+
+If gaps → Clarify and iterate
+If clear → **Approve to proceed**
+```
+
+See [phases/01-PRODUCT-REQUIREMENTS.md](phases/01-PRODUCT-REQUIREMENTS.md) for details.
 
 ---
 
-### Phase 2: Technical Requirements
-
-See [phases/02-TECHNICAL-REQUIREMENTS.md](phases/02-TECHNICAL-REQUIREMENTS.md)
+## Phase 2: Technical Requirements
 
 **Goal**: Define WHAT the technology must do to meet user needs.
 
-**Key Activities**:
-- Translate user stories into technical capabilities
-- Define non-functional requirements (performance, security, scalability)
-- Identify technical constraints and dependencies
-- Specify data requirements and integration points
+### Clarify Loop
 
-**Critical Reflection Questions**:
-- Can we actually build this with available resources?
+```
+Draft Tech Reqs → Review with User → Feasible? Complete?
+        ▲                                    │
+        │              No                    │ Yes
+        └────────────────┘                   ▼
+                                         Approved
+```
+
+### Key Activities
+
+1. **Translate stories** to technical capabilities
+2. **Define NFRs**: Performance, security, scalability
+3. **Identify constraints**: Tech stack, integrations, resources
+4. **Specify data**: Models, storage, retention
+
+### Critical Questions
+
+- Can we actually build this?
 - What are the failure modes?
 - What technical debt are we accepting?
 
+### Approval Gate
+
+```markdown
+## Phase 2: Technical Requirements
+
+**Capabilities**: X technical requirements
+**NFRs**: Performance, security, scalability defined
+**Constraints**: Documented
+
+**Feasibility Issues?**
+- [ ] Any requirements unbuildable?
+- [ ] Resource constraints?
+- [ ] Technical risks?
+
+If issues → Clarify and iterate
+If feasible → **Approve to proceed**
+```
+
+See [phases/02-TECHNICAL-REQUIREMENTS.md](phases/02-TECHNICAL-REQUIREMENTS.md) for details.
+
 ---
 
-### Phase 3: Requirements Integration
+## Phase 3: Requirements Integration
 
-See [phases/03-REQUIREMENTS-INTEGRATION.md](phases/03-REQUIREMENTS-INTEGRATION.md)
+**Goal**: Link product ↔ technical requirements, identify gaps.
 
-**Goal**: Link product and technical requirements, identify gaps.
+### Review Loop
 
-**Key Activities**:
-- Create traceability matrix: user story → technical requirement
-- Identify orphaned requirements (technical without product justification)
-- Find gaps (user needs without technical solutions)
-- Prioritize based on user impact
+```
+Create Traceability → Review Mapping → Gaps Found?
+        ▲                                  │
+        │         Yes (go back)            │ No
+        └─── to Phase 1 or 2 ──────────────▼
+                                       Approved
+```
 
-**Critical Reflection Questions**:
+### Key Activities
+
+1. **Traceability matrix**: User story → technical requirement
+2. **Find orphans**: Technical reqs without product justification
+3. **Find gaps**: User needs without technical solutions
+4. **Prioritize**: By user impact
+
+### Critical Questions
+
 - Does every technical requirement serve a user need?
 - Are all user stories technically addressed?
 - What's the minimum viable scope?
 
+### Approval Gate
+
+```markdown
+## Phase 3: Requirements Integration
+
+**Traceability**: All stories mapped to technical reqs
+**Orphans**: X technical reqs without user justification
+**Gaps**: Y user needs without technical solutions
+
+**Action Required?**
+- If orphans → Remove or justify (back to Phase 2)
+- If gaps → Add technical solution (back to Phase 1/2)
+- If complete → **Approve to proceed**
+```
+
+See [phases/03-REQUIREMENTS-INTEGRATION.md](phases/03-REQUIREMENTS-INTEGRATION.md) for details.
+
 ---
 
-### Phase 4: Diagrams & Artifacts
-
-See [phases/04-DIAGRAMS-ARTIFACTS.md](phases/04-DIAGRAMS-ARTIFACTS.md)
+## Phase 4: Diagrams & Artifacts
 
 **Goal**: Visualize user journeys and system behavior.
 
-**Key Artifacts**:
-- Use case diagrams (actor → system interactions)
-- State diagrams (system states and transitions)
-- User flow diagrams (step-by-step user journeys)
+### Review Loop
+
+```
+Create Diagrams → Review Coverage → All Paths Covered?
+        ▲                                  │
+        │              No                  │ Yes
+        └──────────────┘                   ▼
+                                       Approved
+```
+
+### Key Artifacts
+
+- Use case diagrams (actor → system)
+- State diagrams (system states/transitions)
+- User flow diagrams (step-by-step journeys)
 - Error/edge case mappings
 
-**Templates**: See [templates/](templates/) directory
+Use `diagrams-kroki` skill for diagram generation.
+
+### Approval Gate
+
+```markdown
+## Phase 4: Diagrams & Artifacts
+
+**Diagrams Created**:
+- [ ] Use cases: X diagrams
+- [ ] State machines: Y diagrams
+- [ ] User flows: Z diagrams
+- [ ] Error cases: Documented
+
+**Coverage Complete?**
+If missing paths → Add diagrams and iterate
+If complete → **Approve to proceed**
+```
+
+See [phases/04-DIAGRAMS-ARTIFACTS.md](phases/04-DIAGRAMS-ARTIFACTS.md) for details.
 
 ---
 
-### Phase 5: Architecture & Design
-
-See [phases/05-ARCHITECTURE-DESIGN.md](phases/05-ARCHITECTURE-DESIGN.md)
+## Phase 5: Architecture & Design
 
 **Goal**: Define system structure and component relationships.
 
-**Key Artifacts**:
-- Component/class diagrams
+### Review Loop
+
+```
+Create Architecture → Review Design → Sound & Complete?
+        ▲                                  │
+        │              No                  │ Yes
+        │    (may need earlier phase)      │
+        └──────────────────────────────────▼
+                                       Approved
+```
+
+### Key Artifacts
+
+- C4 diagrams (context, container, component)
+- Class/module diagrams
 - Sequence diagrams (key interactions)
 - Data models and schemas
-- Dependency graphs
+
+### Approval Gate
+
+```markdown
+## Phase 5: Architecture & Design
+
+**Architecture Defined**:
+- [ ] C4 Context diagram
+- [ ] C4 Container diagram
+- [ ] Component diagrams
+- [ ] Data models
+
+**Design Sound?**
+- [ ] Meets NFRs?
+- [ ] Addresses all use cases?
+- [ ] No major risks?
+
+If issues → Iterate (may need Phase 1-4 changes)
+If sound → **Approve to proceed**
+```
+
+See [phases/05-ARCHITECTURE-DESIGN.md](phases/05-ARCHITECTURE-DESIGN.md) for details.
 
 ---
 
-### Phase 6: Interface Contracts
-
-See [phases/06-INTERFACE-CONTRACTS.md](phases/06-INTERFACE-CONTRACTS.md)
+## Phase 6: Interface Contracts
 
 **Goal**: Define all interaction boundaries.
 
-**Interface Types by Product**:
-- **APIs**: OpenAPI/Swagger specs, request/response schemas
-- **CLI**: Command syntax, flags, input/output formats
-- **Frontend**: Component props, API contracts, state shapes
-- **Infrastructure**: Configuration schemas, resource definitions
-
----
-
-### Phase 7: Code Scaffolding
-
-See [phases/07-CODE-SCAFFOLDING.md](phases/07-CODE-SCAFFOLDING.md)
-
-**Goal**: Create project structure without implementation.
-
-**Key Activities**:
-- Directory structure matching architecture
-- Empty modules/classes with signatures
-- Configuration files
-- Build/dependency setup
-
----
-
-### Phase 8: Test Development
-
-See [phases/08-TEST-DEVELOPMENT.md](phases/08-TEST-DEVELOPMENT.md)
-
-**Goal**: Write tests before implementation (TDD approach).
-
-**Test Categories**:
-- Unit tests for each component
-- Integration tests for interfaces
-- Contract tests for APIs
-- End-to-end tests for user flows
-
----
-
-### Phase 9: Implementation
-
-See [phases/09-IMPLEMENTATION.md](phases/09-IMPLEMENTATION.md)
-
-**Goal**: Build the application to pass all tests.
-
-**Approach**:
-- Implement one component at a time
-- Run tests after each component
-- Document decisions and deviations
-- Keep implementation aligned with design
-
----
-
-### Phase 10: Simulation Testing
-
-See [phases/10-SIMULATION-TESTING.md](phases/10-SIMULATION-TESTING.md)
-
-**Goal**: Validate system behavior under realistic conditions.
-
-**When Required**:
-- Distributed systems
-- High-throughput services
-- Complex state machines
-- External dependency interactions
-
----
-
-## Quick Start Checklist
-
-Copy this checklist to track progress:
+### Review Loop
 
 ```
-Product Development Progress:
-- [ ] Phase 1: Product Requirements (Approved: ___)
-- [ ] Phase 2: Technical Requirements (Approved: ___)
-- [ ] Phase 3: Requirements Integration (Approved: ___)
-- [ ] Phase 4: Diagrams & Artifacts (Approved: ___)
-- [ ] Phase 5: Architecture & Design (Approved: ___)
-- [ ] Phase 6: Interface Contracts (Approved: ___)
-- [ ] Phase 7: Code Scaffolding (Approved: ___)
-- [ ] Phase 8: Test Development (Approved: ___)
-- [ ] Phase 9: Implementation (Approved: ___)
-- [ ] Phase 10: Simulation Testing (Approved: ___ / Skipped: ___)
+Define Contracts → Review Completeness → All Interfaces Covered?
+        ▲                                       │
+        │                  No                   │ Yes
+        └──────────────────┘                    ▼
+                                            Approved
 ```
+
+### Interface Types
+
+| Product Type | Interfaces |
+|--------------|------------|
+| **API** | OpenAPI spec, request/response schemas |
+| **CLI** | Command syntax, flags, I/O formats |
+| **Frontend** | Component props, state shapes |
+| **Infrastructure** | Config schemas, resource definitions |
+
+### Approval Gate
+
+```markdown
+## Phase 6: Interface Contracts
+
+**Contracts Defined**:
+- [ ] API endpoints: X with full specs
+- [ ] CLI commands: Y with syntax
+- [ ] Events/messages: Z with schemas
+
+**All Interfaces Covered?**
+If missing → Add contracts and iterate
+If complete → **Approve and proceed to implementation**
+```
+
+See [phases/06-INTERFACE-CONTRACTS.md](phases/06-INTERFACE-CONTRACTS.md) for details.
+
+---
+
+## Completion & Handoff
+
+```markdown
+## Product Development Complete
+
+**Artifacts Produced**:
+- [ ] Product requirements (personas, stories, boundaries)
+- [ ] Technical requirements (capabilities, NFRs, constraints)
+- [ ] Traceability matrix
+- [ ] Diagrams (use case, state, flow, architecture)
+- [ ] Interface contracts
+
+**Ready for Implementation**:
+Run `software-engineering` skill with these artifacts.
+
+**Planning Location**: ./planning/{project}/
+```
+
+---
 
 ## Interaction Style
 
-Throughout all phases:
-
-1. **Be Interactive**: Present options, don't assume
-2. **Show Trade-offs**: Every decision has pros/cons
-3. **Recommend Clearly**: Mark recommended option with **
-4. **Wait for Approval**: Never proceed without user confirmation
-5. **Link to User Impact**: Connect technical decisions to user expectations
+1. **Iterate**: Use review loops, don't assume first draft is final
+2. **Clarify**: Ask questions, surface assumptions
+3. **Show Trade-offs**: Every decision has pros/cons
+4. **Recommend Clearly**: Mark recommended option with **
+5. **Wait for Approval**: Never proceed without user confirmation
+6. **Link to Users**: Connect every decision to user impact
