@@ -74,21 +74,21 @@ The daemon supports **three deployment modes** to handle different use cases:
 
 ### 2.1 The Isolation Problem
 
-When multiple projects use kubefwd simultaneously, conflicts can occur:
+When multiple projects use kubefwd simultaneously, conflicts can occur in /etc/hosts:
 
 ```
-Project A (e-commerce)          Project B (analytics)
-─────────────────────          ─────────────────────
-namespace: prod                namespace: prod
-service: api → 127.0.0.1:8080  service: api → 127.0.0.1:8080  ← CONFLICT!
-service: db  → 127.0.0.1:5432  service: db  → 127.0.0.1:5432  ← CONFLICT!
+Project A (e-commerce)                      Project B (analytics)
+─────────────────────                      ─────────────────────
+namespace: prod                            namespace: prod
+service: api.prod.svc.cluster.local        service: api.prod.svc.cluster.local  ← CONFLICT!
+service: db.prod.svc.cluster.local         service: db.prod.svc.cluster.local   ← CONFLICT!
 ```
 
 ### 2.2 Isolation Mechanisms
 
 #### Option A: Per-Project Kubefwd Instance (Recommended for Devenv)
 
-Each project runs its own kubefwd instance with isolated networking:
+Each project runs its own kubefwd instance with isolated domain suffix via `--domain` flag:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -98,11 +98,11 @@ Each project runs its own kubefwd instance with isolated networking:
 │  │   Project A (devenv)    │    │   Project B (devenv)    │        │
 │  │                         │    │                         │        │
 │  │  kubefwd instance       │    │  kubefwd instance       │        │
-│  │  API: localhost:9876    │    │  API: localhost:9877    │        │
-│  │  IP range: 127.1.0.x    │    │  IP range: 127.2.0.x    │        │
+│  │  --domain proj-a.local  │    │  --domain proj-b.local  │        │
+│  │  API: kubefwd.internal  │    │  API: kubefwd.internal  │        │
 │  │                         │    │                         │        │
-│  │  api.prod → 127.1.0.1   │    │  api.prod → 127.2.0.1   │        │
-│  │  db.prod  → 127.1.0.2   │    │  db.prod  → 127.2.0.2   │        │
+│  │  api.prod.proj-a.local  │    │  api.prod.proj-b.local  │        │
+│  │  db.prod.proj-a.local   │    │  db.prod.proj-b.local   │        │
 │  └─────────────────────────┘    └─────────────────────────┘        │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
@@ -111,12 +111,10 @@ Each project runs its own kubefwd instance with isolated networking:
 **Implementation:**
 ```yaml
 # Project A: .envrc or devenv.nix
-KUBEFWD_API_PORT: 9876
-KUBEFWD_IP_PREFIX: "127.1"
+KUBEFWD_DOMAIN: "proj-a.local"
 
 # Project B: .envrc or devenv.nix
-KUBEFWD_API_PORT: 9877
-KUBEFWD_IP_PREFIX: "127.2"
+KUBEFWD_DOMAIN: "proj-b.local"
 ```
 
 #### Option B: Shared Daemon with Profile Namespacing
@@ -137,13 +135,16 @@ profiles:
     context: analytics-cluster
 ```
 
-**Hosts file isolation:**
+**Hosts file isolation (with --domain):**
 ```
 # /etc/hosts (managed by kubefwd)
-127.1.0.1  api.development.svc.cluster.local      # ecommerce
-127.1.0.2  db.development.svc.cluster.local       # ecommerce
-127.2.0.1  api.development.svc.cluster.local      # analytics (different IP!)
-127.2.0.2  db.development.svc.cluster.local       # analytics
+# Project A uses --domain ecommerce.local
+127.0.0.1  api.development.ecommerce.local
+127.0.0.2  db.development.ecommerce.local
+
+# Project B uses --domain analytics.local
+127.0.0.3  api.development.analytics.local
+127.0.0.4  db.development.analytics.local
 ```
 
 #### Option C: Context-Based Isolation (Simplest)
@@ -325,19 +326,15 @@ nix-kubefwd-daemon/
 let
   cfg = config.services.kubefwd;
 
-  # Generate a deterministic port based on project path
+  # Generate a deterministic domain suffix based on project path
   projectHash = builtins.hashString "sha256" (toString config.devenv.root);
-  defaultPort = 10000 + (lib.mod (lib.fromHexString (builtins.substring 0 4 projectHash)) 10000);
-
-  # Generate IP prefix (127.X.0.0/16) based on project
-  ipOctet = 1 + (lib.mod (lib.fromHexString (builtins.substring 4 2 projectHash)) 254);
-  defaultIpPrefix = "127.${toString ipOctet}";
+  hashPrefix = builtins.substring 0 8 projectHash;
+  defaultDomain = "p${hashPrefix}.local";
 
   configFile = pkgs.writeText "kubefwd-devenv.yaml" (builtins.toJSON {
     daemon = {
       log_level = cfg.logLevel;
-      api_port = cfg.apiPort;
-      ip_prefix = cfg.ipPrefix;
+      domain = cfg.domain;
       socket_path = "${config.devenv.runtime}/kubefwd.sock";
       state_file = "${config.devenv.state}/kubefwd-state.json";
     };
@@ -394,16 +391,11 @@ in
       example = [ "api-gateway" "postgres" "redis" ];
     };
 
-    apiPort = lib.mkOption {
-      type = lib.types.port;
-      default = defaultPort;
-      description = "Port for kubefwd REST API (auto-generated for isolation)";
-    };
-
-    ipPrefix = lib.mkOption {
+    domain = lib.mkOption {
       type = lib.types.str;
-      default = defaultIpPrefix;
-      description = "IP prefix for service addresses (e.g., 127.1 → 127.1.0.x)";
+      default = defaultDomain;
+      description = "Domain suffix for /etc/hosts entries (auto-generated for isolation)";
+      example = "myproject.local";
     };
 
     logLevel = lib.mkOption {
@@ -431,8 +423,8 @@ in
       process-compose = {
         readiness_probe = {
           http_get = {
-            host = "127.0.0.1";
-            port = cfg.apiPort;
+            host = "kubefwd.internal";
+            port = 80;
             path = "/api/v1/status";
           };
           initial_delay_seconds = 2;
@@ -447,15 +439,15 @@ in
 
     # Environment variables for the project
     env = {
-      KUBEFWD_API_URL = "http://127.0.0.1:${toString cfg.apiPort}";
-      KUBEFWD_IP_PREFIX = cfg.ipPrefix;
+      KUBEFWD_API_URL = "http://kubefwd.internal/api/v1";
+      KUBEFWD_DOMAIN = cfg.domain;
     };
 
     # Shell hook to show status
     enterShell = lib.mkIf cfg.autoStart ''
-      echo "🔀 kubefwd: Forwarding services from namespaces: ${lib.concatStringsSep ", " cfg.namespaces}"
-      echo "   API: http://127.0.0.1:${toString cfg.apiPort}"
-      echo "   IP Range: ${cfg.ipPrefix}.0.x"
+      echo "kubefwd: Forwarding services from namespaces: ${lib.concatStringsSep ", " cfg.namespaces}"
+      echo "   API: http://kubefwd.internal/api/v1"
+      echo "   Domain: *.${cfg.domain}"
     '';
   };
 }
@@ -771,6 +763,9 @@ in
 
 ### 4.1 API Client Design
 
+**Note:** kubefwd's REST API is accessed via the `kubefwd.internal` hostname, which kubefwd
+adds to /etc/hosts when running. There is no configurable port - the API is served on port 80.
+
 ```rust
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -782,9 +777,10 @@ pub struct KubefwdClient {
 }
 
 impl KubefwdClient {
-    pub fn new(api_port: u16) -> Self {
+    pub fn new() -> Self {
         Self {
-            base_url: format!("http://127.0.0.1:{}/api/v1", api_port),
+            // kubefwd API is always at kubefwd.internal (added to /etc/hosts by kubefwd)
+            base_url: "http://kubefwd.internal/api/v1".to_string(),
             client: Client::new(),
         }
     }
@@ -912,17 +908,17 @@ pub enum KubefwdEvent {
 }
 
 pub struct EventListener {
-    api_port: u16,
     event_tx: mpsc::Sender<KubefwdEvent>,
 }
 
 impl EventListener {
-    pub fn new(api_port: u16, event_tx: mpsc::Sender<KubefwdEvent>) -> Self {
-        Self { api_port, event_tx }
+    pub fn new(event_tx: mpsc::Sender<KubefwdEvent>) -> Self {
+        Self { event_tx }
     }
 
     pub async fn run(&self, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
-        let url = format!("http://127.0.0.1:{}/api/v1/events", self.api_port);
+        // kubefwd API is always at kubefwd.internal (added to /etc/hosts)
+        let url = "http://kubefwd.internal/api/v1/events";
 
         loop {
             let mut es = EventSource::get(&url);
@@ -964,17 +960,15 @@ use std::process::{Child, Command, Stdio};
 use tokio::sync::broadcast;
 
 pub struct KubefwdSupervisor {
-    api_port: u16,
-    ip_prefix: String,
+    domain: String,
     process: Option<Child>,
     retry_config: RetryConfig,
 }
 
 impl KubefwdSupervisor {
-    pub fn new(api_port: u16, ip_prefix: String, retry_config: RetryConfig) -> Self {
+    pub fn new(domain: String, retry_config: RetryConfig) -> Self {
         Self {
-            api_port,
-            ip_prefix,
+            domain,
             process: None,
             retry_config,
         }
@@ -982,13 +976,14 @@ impl KubefwdSupervisor {
 
     /// Start kubefwd in idle + API mode
     pub async fn start(&mut self) -> Result<()> {
+        // Use sudo -n to fail immediately if sudoers not configured
         let child = Command::new("sudo")
             .args([
-                "-E",
+                "-n",  // non-interactive: fail if password required
+                "-E",  // preserve environment
                 "kubefwd",
                 "--api",
-                "--api-port", &self.api_port.to_string(),
-                "--ip-prefix", &self.ip_prefix,
+                "--domain", &self.domain,
                 // Idle mode: no namespaces specified, add via API
             ])
             .stdout(Stdio::piped())
@@ -1003,9 +998,9 @@ impl KubefwdSupervisor {
         Ok(())
     }
 
-    /// Wait for kubefwd API to become available
+    /// Wait for kubefwd API to become available (at kubefwd.internal)
     async fn wait_for_api(&self) -> Result<()> {
-        let client = KubefwdClient::new(self.api_port);
+        let client = KubefwdClient::new();
 
         for attempt in 1..=30 {
             match client.health().await {
@@ -1053,7 +1048,7 @@ impl KubefwdSupervisor {
             if self.process.is_none() {
                 match self.start().await {
                     Ok(()) => {
-                        tracing::info!("kubefwd started (API port: {})", self.api_port);
+                        tracing::info!("kubefwd started (domain: {})", self.domain);
                         backoff = self.retry_config.initial_delay;
                         consecutive_failures = 0;
                     }
@@ -1130,8 +1125,7 @@ daemon:
 
   # kubefwd process settings
   kubefwd:
-    api_port: 9898                     # REST API port
-    ip_prefix: "127.1"                 # IP range for services (127.1.0.x)
+    domain: "myproject.local"          # Domain suffix for /etc/hosts isolation
 
 defaults:
   retry:
@@ -1193,10 +1187,8 @@ pub struct DaemonConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KubefwdConfig {
-    #[serde(default = "default_api_port")]
-    pub api_port: u16,
-    #[serde(default = "default_ip_prefix")]
-    pub ip_prefix: String,
+    #[serde(default = "default_domain")]
+    pub domain: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1244,8 +1236,7 @@ pub enum LogLevel {
 
 // Default value functions
 fn default_log_level() -> LogLevel { LogLevel::Info }
-fn default_api_port() -> u16 { 9898 }
-fn default_ip_prefix() -> String { "127.1".to_string() }
+fn default_domain() -> String { "kubefwd.local".to_string() }
 fn default_initial_delay() -> Duration { Duration::from_secs(1) }
 fn default_max_delay() -> Duration { Duration::from_secs(60) }
 fn default_multiplier() -> f64 { 2.0 }
@@ -1366,8 +1357,8 @@ kubefwd-daemon v0.1.0
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Daemon:     ● Running (uptime: 2d 4h 12m)
-kubefwd:    ● Running (pid: 12345, API: http://127.0.0.1:9898)
-IP Range:   127.1.0.x
+kubefwd:    ● Running (pid: 12345, API: http://kubefwd.internal)
+Domain:     *.myproject.local
 
 Profiles (2 active, 1 disabled):
 ┌─────────────┬──────────┬─────────────────────┬────────────┐
@@ -1379,15 +1370,15 @@ Profiles (2 active, 1 disabled):
 └─────────────┴──────────┴─────────────────────┴────────────┘
 
 Services (17 total):
-┌─────────────────────┬─────────────┬────────────────┬──────────┐
-│ Service             │ Namespace   │ Local Address  │ Status   │
-├─────────────────────┼─────────────┼────────────────┼──────────┤
-│ api-gateway         │ development │ 127.1.0.1:8080 │ ● Up     │
-│ user-service        │ development │ 127.1.0.2:8080 │ ● Up     │
-│ postgres            │ shared      │ 127.1.0.3:5432 │ ● Up     │
-│ redis               │ shared      │ 127.1.0.4:6379 │ ◐ Reconn │
-│ ...                 │ ...         │ ...            │ ...      │
-└─────────────────────┴─────────────┴────────────────┴──────────┘
+┌─────────────────────┬─────────────┬──────────────────────────────────┬──────────┐
+│ Service             │ Namespace   │ Hostname                         │ Status   │
+├─────────────────────┼─────────────┼──────────────────────────────────┼──────────┤
+│ api-gateway         │ development │ api-gateway.development.myproject.local │ ● Up │
+│ user-service        │ development │ user-service.development.myproject.local │ ● Up │
+│ postgres            │ shared      │ postgres.shared.myproject.local  │ ● Up     │
+│ redis               │ shared      │ redis.shared.myproject.local     │ ◐ Reconn │
+│ ...                 │ ...         │ ...                              │ ...      │
+└─────────────────────┴─────────────┴──────────────────────────────────┴──────────┘
 
 Metrics:
   Total reconnects: 7
@@ -1635,7 +1626,8 @@ pkgs.nixosTest {
 | Config file permissions | Warn if world-readable |
 | Credential handling | Never log kubeconfig contents |
 | Process isolation | kubefwd runs as separate process |
-| API binding | localhost only (127.0.0.1) |
+| API binding | kubefwd.internal hostname (localhost via /etc/hosts) |
+| Sudo validation | Use `sudo -n` to fail fast if sudoers not configured |
 
 ---
 
@@ -1645,3 +1637,4 @@ pkgs.nixosTest {
 |---------|------|---------|
 | 1.0 | 2025-01-15 | Initial architecture (multi-process) |
 | 2.0 | 2025-01-15 | Revised for REST API approach, added devenv integration, isolation strategies |
+| 2.1 | 2025-01-16 | Corrected kubefwd API details: use `--domain` flag for isolation (not `--api-port`/`--ip-prefix`), API accessed via `kubefwd.internal` hostname, use `sudo -n` for non-interactive sudo |

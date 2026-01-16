@@ -20,7 +20,7 @@ Implement a **kubefwd daemon** that provides:
 - Robust process supervision of a single kubefwd instance (via REST API)
 - Real-time event monitoring via SSE for instant reconnection awareness
 - Declarative configuration for port-forwarding profiles
-- Project isolation via unique IP prefixes and API ports
+- Project isolation via unique domain suffixes (`--domain` flag)
 - System service integration (systemd/launchd) and devenv integration via Nix
 - CLI interface for daemon control and status inspection
 
@@ -48,6 +48,7 @@ Implement a **kubefwd daemon** that provides:
 | FR-CORE-06 | Daemon shall support hot-reload of configuration | Should |
 | FR-CORE-07 | Daemon shall control kubefwd via REST API (add/remove namespaces) | Must |
 | FR-CORE-08 | Daemon shall monitor kubefwd events via SSE stream | Must |
+| FR-CORE-09 | Daemon shall validate sudoers configuration at startup (use `sudo -n`) | Must |
 
 ### 2.2 Connection Management (FR-CONN)
 
@@ -65,12 +66,12 @@ Implement a **kubefwd daemon** that provides:
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-ISO-01 | Each daemon instance shall use a unique API port for kubefwd | Must |
-| FR-ISO-02 | Each daemon instance shall use a unique IP prefix (127.X.0.0/16) | Must |
-| FR-ISO-03 | Default API port shall be deterministically derived from project path hash | Must |
-| FR-ISO-04 | Default IP prefix shall be deterministically derived from project path hash | Must |
-| FR-ISO-05 | Users shall be able to override auto-generated port and IP prefix | Must |
-| FR-ISO-06 | Multiple daemon instances shall be able to run concurrently without conflict | Must |
+| FR-ISO-01 | Each daemon instance shall use a unique domain suffix via `--domain` flag | Must |
+| FR-ISO-02 | Default domain suffix shall be deterministically derived from project path hash | Must |
+| FR-ISO-03 | Users shall be able to override auto-generated domain suffix | Must |
+| FR-ISO-04 | Multiple daemon instances shall be able to run concurrently without conflict | Must |
+| FR-ISO-05 | Each project's services shall resolve to unique /etc/hosts entries | Must |
+| FR-ISO-06 | Daemon shall validate no domain conflicts before starting kubefwd | Should |
 
 ### 2.4 Configuration (FR-CFG)
 
@@ -140,7 +141,7 @@ Implement a **kubefwd daemon** that provides:
 | NFR-SEC-03 | Configuration files shall support restricted permissions | 0600 recommended |
 | NFR-SEC-04 | Daemon shall not expose sensitive data in logs | Mask kubeconfig paths |
 | NFR-SEC-05 | Unix socket for CLI communication shall have restricted permissions | User-only access |
-| NFR-SEC-06 | kubefwd REST API shall bind to localhost only | 127.0.0.1 |
+| NFR-SEC-06 | kubefwd REST API accessible via `kubefwd.internal` hostname | /etc/hosts entry |
 
 ### 3.4 Compatibility (NFR-COMPAT)
 
@@ -168,8 +169,7 @@ daemon:
 
   # kubefwd process settings
   kubefwd:
-    api_port: 9898                     # Override auto-generated port (optional)
-    ip_prefix: "127.1"                 # Override auto-generated prefix (optional)
+    domain: "proj1.local"              # Override auto-generated domain suffix (optional)
 
 defaults:
   retry:
@@ -218,9 +218,8 @@ profiles:
     # Optional: specific services only
     services = [ "api-gateway" "postgres" "redis" ];
 
-    # Optional: override auto-generated values
-    # apiPort = 9876;      # Default: hash-based
-    # ipPrefix = "127.5";  # Default: hash-based
+    # Optional: override auto-generated domain suffix
+    # domain = "myproject.local";  # Default: hash-based from project path
   };
 }
 ```
@@ -248,10 +247,10 @@ services.kubefwd-daemon = {
 ### 5.1 kubefwd Version
 
 **kubefwd >= v1.25.0 is required.** This version introduced:
-- REST API with 40+ endpoints for programmatic control
+- REST API with 40+ endpoints for programmatic control (accessed via `kubefwd.internal`)
 - Idle mode (start without namespaces, add via API)
-- SSE event streaming for real-time monitoring
-- `--api-port` and `--ip-prefix` flags for isolation
+- SSE event streaming for real-time monitoring at `/api/v1/events`
+- `--domain` flag for project isolation (custom hostname suffix)
 
 ### 5.2 Sudoers Configuration
 
@@ -293,12 +292,12 @@ your-username ALL=(ALL) NOPASSWD: /home/your-username/.nix-profile/bin/kubefwd
 > As a developer working on multiple projects simultaneously, I want each project to have isolated port forwarding so that services from different projects don't conflict even if they use the same namespace names.
 
 **Acceptance Criteria:**
-- Each devenv project gets its own kubefwd instance with unique API port
-- Each project uses a different IP range (127.X.0.x) to avoid conflicts
-- Port and IP assignment is automatic by default (hash-based)
-- Can manually override port and IP prefix if needed
+- Each devenv project gets its own kubefwd instance with unique domain suffix
+- Each project uses a different domain suffix (e.g., `svc.proj1.local`) to avoid /etc/hosts conflicts
+- Domain assignment is automatic by default (hash-based from project path)
+- Can manually override domain suffix if needed
 - Running `devenv up` in Project A doesn't affect forwarding in Project B
-- Services with same name in different projects resolve to different IPs
+- Services with same name in different projects resolve to different hostnames
 
 ### 6.4 Debugging Connection Issues
 
@@ -376,7 +375,7 @@ The following are explicitly out of scope for the initial release:
 |------|----------|-----------|-----------|
 | **System Service** | Always-on forwarding for all users | systemd service | Shared |
 | **User Service** | Per-user forwarding | systemd user service / launchd | Per-user |
-| **Devenv Service** | Per-project forwarding | process-compose | Per-project (unique port/IP) |
+| **Devenv Service** | Per-project forwarding | process-compose | Per-project (unique domain) |
 
 ---
 
@@ -386,3 +385,4 @@ The following are explicitly out of scope for the initial release:
 |---------|------|--------|---------|
 | 1.0 | 2025-01-15 | - | Initial requirements |
 | 2.0 | 2025-01-16 | - | Updated for REST API architecture, added isolation requirements, devenv integration, multi-project user story, kubefwd v1.25.0 requirement |
+| 2.1 | 2025-01-16 | - | Corrected kubefwd API details: use `--domain` flag for isolation (not `--api-port`/`--ip-prefix`), API accessed via `kubefwd.internal` hostname, added FR-CORE-09 for sudoers validation |

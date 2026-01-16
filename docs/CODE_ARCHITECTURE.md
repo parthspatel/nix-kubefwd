@@ -138,10 +138,8 @@ classDiagram
     }
 
     class KubefwdConfig {
-        +api_port: Option~u16~
-        +ip_prefix: Option~String~
-        +get_api_port(project_hash: u64) u16
-        +get_ip_prefix(project_hash: u64) String
+        +domain: Option~String~
+        +get_domain(project_hash: u64) String
     }
 
     class ProfileConfig {
@@ -183,12 +181,11 @@ classDiagram
 ```mermaid
 classDiagram
     class KubefwdSupervisor {
-        -api_port: u16
-        -ip_prefix: String
+        -domain: String
         -process: Option~Child~
         -retry_config: RetryConfig
         -state: Arc~StateManager~
-        +new(api_port, ip_prefix, retry_config, state) Self
+        +new(domain, retry_config, state) Self
         +start() Result~()~
         +stop() Result~()~
         +supervise(shutdown_rx) Result~()~
@@ -200,7 +197,7 @@ classDiagram
     class KubefwdClient {
         -base_url: String
         -client: reqwest::Client
-        +new(api_port: u16) Self
+        +new() Self
         +health() Result~bool~
         +status() Result~StatusResponse~
         +add_namespace(req: AddNamespaceRequest) Result~NamespaceResponse~
@@ -208,15 +205,16 @@ classDiagram
         +list_services() Result~Vec~ServiceInfo~~
         +list_namespaces() Result~Vec~String~~
     }
+    note for KubefwdClient "API at kubefwd.internal<br/>(via /etc/hosts)"
 
     class EventListener {
-        -api_port: u16
         -event_tx: mpsc::Sender~KubefwdEvent~
-        +new(api_port, event_tx) Self
+        +new(event_tx) Self
         +run(shutdown_rx) Result~()~
         -connect_sse() Result~EventSource~
         -handle_event(event: Event) Option~KubefwdEvent~
     }
+    note for EventListener "SSE at kubefwd.internal/api/v1/events"
 
     class KubefwdEvent {
         <<enumeration>>
@@ -246,7 +244,7 @@ classDiagram
     class ServiceInfo {
         +name: String
         +namespace: String
-        +local_ip: String
+        +hostname: String
         +local_port: u16
         +cluster_ip: String
         +cluster_port: u16
@@ -310,7 +308,7 @@ classDiagram
     class ServiceState {
         +name: String
         +namespace: String
-        +local_ip: String
+        +hostname: String
         +local_port: u16
         +status: ServiceStatus
         +connected_at: Option~DateTime~Utc~~
@@ -436,7 +434,7 @@ sequenceDiagram
     Daemon->>State: new(state_file)
     State->>State: load_or_init()
 
-    Daemon->>Supervisor: new(api_port, ip_prefix)
+    Daemon->>Supervisor: new(domain)
     Daemon->>IPC: new(socket_path)
 
     Main->>Daemon: run()
@@ -447,7 +445,7 @@ sequenceDiagram
     and
         Daemon->>Supervisor: supervise(shutdown_rx)
         Supervisor->>Supervisor: spawn_process()
-        Supervisor->>Kubefwd: sudo kubefwd --api --idle
+        Supervisor->>Kubefwd: sudo -n kubefwd --api --domain X
         Supervisor->>Supervisor: wait_for_api()
 
         loop Health Check
@@ -573,9 +571,9 @@ sequenceDiagram
     Supervisor->>Supervisor: sleep(backoff)
 
     Supervisor->>Supervisor: spawn_process()
-    Supervisor->>Kubefwd: sudo kubefwd --api --idle
+    Supervisor->>Kubefwd: sudo -n kubefwd --api --domain X
 
-    loop Wait for API (max 30 attempts)
+    loop Wait for API at kubefwd.internal (max 30 attempts)
         Supervisor->>Client: health()
         alt API not ready
             Client--xSupervisor: Connection refused
@@ -686,7 +684,7 @@ graph TB
         end
 
         subgraph "Lib"
-            HashLib[hash utilities<br/>port/IP generation]
+            HashLib[hash utilities<br/>domain generation]
         end
     end
 
@@ -726,14 +724,14 @@ graph TB
     subgraph "Developer Machine"
         subgraph "Project A Directory"
             DevenvA[devenv shell]
-            DaemonA[kubefwd-daemon<br/>port: 10234<br/>IP: 127.42.x.x]
-            KubefwdA[kubefwd<br/>API: :10234]
+            DaemonA[kubefwd-daemon<br/>domain: proj-a.local]
+            KubefwdA[kubefwd<br/>API: kubefwd.internal]
         end
 
         subgraph "Project B Directory"
             DevenvB[devenv shell]
-            DaemonB[kubefwd-daemon<br/>port: 10567<br/>IP: 127.89.x.x]
-            KubefwdB[kubefwd<br/>API: :10567]
+            DaemonB[kubefwd-daemon<br/>domain: proj-b.local]
+            KubefwdB[kubefwd<br/>API: kubefwd.internal]
         end
 
         EtcHosts[/etc/hosts]
@@ -969,12 +967,12 @@ sequenceDiagram
     Shell->>PC: start processes
 
     PC->>Daemon: exec kubefwd-daemon --config ...
-    Note over Daemon: Calculate hash-based port/IP
+    Note over Daemon: Calculate hash-based domain suffix
 
-    Daemon->>Kubefwd: spawn with --api --api-port X --ip-prefix Y
-    Daemon->>Kubefwd: wait for API ready
+    Daemon->>Kubefwd: spawn with --api --domain X
+    Daemon->>Kubefwd: wait for API ready (kubefwd.internal)
 
-    PC->>PC: readiness_probe /api/v1/status
+    PC->>PC: readiness_probe kubefwd.internal/api/v1/status
     Kubefwd-->>PC: 200 OK
 
     PC-->>Shell: All processes ready
