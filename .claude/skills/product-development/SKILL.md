@@ -39,6 +39,49 @@ Select the appropriate guide based on what you're building:
 - **Frontend Applications**: See [product-types/FRONTEND.md](product-types/FRONTEND.md)
 - **Infrastructure**: See [product-types/INFRASTRUCTURE.md](product-types/INFRASTRUCTURE.md)
 
+## Tool Integrations
+
+Standardized tooling for artifacts, environments, and delivery:
+
+| Category | Tool | Documentation |
+|----------|------|---------------|
+| **Diagrams** | Kroki + UML-MCP | [integrations/DIAGRAMS-MCP.md](integrations/DIAGRAMS-MCP.md) |
+| **Planning** | Epics/Stories/Tasks | [integrations/PLANNING-STRUCTURE.md](integrations/PLANNING-STRUCTURE.md) |
+| **UI Design** | Figma (GUI/TUI) | [integrations/FIGMA.md](integrations/FIGMA.md) |
+| **Environments** | Nix/devenv/direnv/SOPS | [integrations/NIX-DEVENV.md](integrations/NIX-DEVENV.md) |
+| **Containers** | Podman | [integrations/PODMAN.md](integrations/PODMAN.md) |
+| **CI/CD** | GitHub Actions | [integrations/GITHUB-ACTIONS.md](integrations/GITHUB-ACTIONS.md) |
+| **Documentation** | Sphinx + RST | [integrations/SPHINX-DOCS.md](integrations/SPHINX-DOCS.md) |
+
+### MCP Server Configuration
+
+Add to `.claude/mcp.json` for diagram support:
+
+```json
+{
+  "mcpServers": {
+    "uml": {
+      "command": "uvx",
+      "args": ["uml-mcp"],
+      "env": { "KROKI_SERVER": "https://kroki.io" }
+    }
+  }
+}
+```
+
+### Planning Directory Structure
+
+```
+./planning/{YYYYMMDD}_{project}/
+├── PROJECT.md                    # Status & overview
+├── requirements/                 # Phase 1-3 outputs
+├── diagrams/                     # Phase 4-5 outputs
+├── design/                       # Phase 5-6 outputs
+└── epics/{E###}_{name}/         # Work breakdown
+    └── stories/{S###}_{name}/
+        └── tasks/{T###}_{name}.md
+```
+
 ## Phase Execution Pattern
 
 For each phase, follow this pattern:
