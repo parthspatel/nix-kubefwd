@@ -39,37 +39,21 @@ Select the appropriate guide based on what you're building:
 - **Frontend Applications**: See [product-types/FRONTEND.md](product-types/FRONTEND.md)
 - **Infrastructure**: See [product-types/INFRASTRUCTURE.md](product-types/INFRASTRUCTURE.md)
 
-## Tool Integrations
+## Companion Skills
 
-Standardized tooling for artifacts, environments, and delivery:
+This workflow uses standalone skills for specialized tooling:
 
-| Category | Tool | Documentation |
-|----------|------|---------------|
-| **Diagrams** | Kroki + UML-MCP | [integrations/DIAGRAMS-MCP.md](integrations/DIAGRAMS-MCP.md) |
-| **Planning** | Epics/Stories/Tasks | [integrations/PLANNING-STRUCTURE.md](integrations/PLANNING-STRUCTURE.md) |
-| **UI Design** | Figma (GUI/TUI) | [integrations/FIGMA.md](integrations/FIGMA.md) |
-| **Environments** | Nix/devenv/direnv/SOPS | [integrations/NIX-DEVENV.md](integrations/NIX-DEVENV.md) |
-| **Containers** | Podman | [integrations/PODMAN.md](integrations/PODMAN.md) |
-| **CI/CD** | GitHub Actions | [integrations/GITHUB-ACTIONS.md](integrations/GITHUB-ACTIONS.md) |
-| **Documentation** | Sphinx + RST | [integrations/SPHINX-DOCS.md](integrations/SPHINX-DOCS.md) |
+| Phase | Skill | Purpose |
+|-------|-------|---------|
+| 4-5 | `diagrams-kroki` | UML, C4, sequence, state, ERD diagrams |
+| 7+ | `nix-devenv` | Reproducible dev environments, secrets |
+| 9 | `podman-deploy` | Container builds, Compose, Quadlet |
+| 9 | `github-actions-ci` | CI/CD pipelines, releases |
+| All | `sphinx-docs` | Project documentation |
 
-### MCP Server Configuration
+### Planning Structure (Built-in)
 
-Add to `.claude/mcp.json` for diagram support:
-
-```json
-{
-  "mcpServers": {
-    "uml": {
-      "command": "uvx",
-      "args": ["uml-mcp"],
-      "env": { "KROKI_SERVER": "https://kroki.io" }
-    }
-  }
-}
-```
-
-### Planning Directory Structure
+See [planning/STRUCTURE.md](planning/STRUCTURE.md) for epic/story/task templates.
 
 ```
 ./planning/{YYYYMMDD}_{project}/
@@ -77,10 +61,14 @@ Add to `.claude/mcp.json` for diagram support:
 ├── requirements/                 # Phase 1-3 outputs
 ├── diagrams/                     # Phase 4-5 outputs
 ├── design/                       # Phase 5-6 outputs
-└── epics/{E###}_{name}/         # Work breakdown
+└── epics/{E###}_{name}/
     └── stories/{S###}_{name}/
         └── tasks/{T###}_{name}.md
 ```
+
+### UI Design (Built-in)
+
+See [design/FIGMA.md](design/FIGMA.md) for GUI/TUI design standards.
 
 ## Phase Execution Pattern
 
