@@ -1,2 +1,2 @@
-# nix-kubefwd-daemon
-A kubefwd daemon to manage kubefwd.
+# nix-kubefwd
+A nix plugin to manage kubefwd, especially for devenv profiles.
