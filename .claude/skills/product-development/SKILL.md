@@ -105,6 +105,7 @@ Select based on what you're building:
 | **Implement design** | `software-engineering` | After Phase 6 |
 | Setup environment | `nix-devenv` | Before implementation |
 | Documentation | `sphinx-docs` | Throughout |
+| **Complexity scoring** | `dynamic-tasks` | For iteration planning |
 
 ## Planning Structure
 

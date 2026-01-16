@@ -93,6 +93,7 @@ project/
 | Container builds | `podman-deploy` | Deployment prep |
 | CI/CD pipelines | `github-actions-ci` | After implementation |
 | Documentation | `sphinx-docs` | Throughout |
+| **Complexity scoring** | `dynamic-tasks` | For iteration planning |
 
 ---
 
