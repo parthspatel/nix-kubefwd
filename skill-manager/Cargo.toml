@@ -1,0 +1,76 @@
+[package]
+name = "claude-skill-manager"
+version = "0.1.0"
+edition = "2021"
+authors = ["Anthropic"]
+description = "CLI and TUI for managing Claude AI skills"
+license = "MIT"
+repository = "https://github.com/anthropics/claude-skill-manager"
+keywords = ["claude", "ai", "skills", "cli", "tui"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.75"
+
+[[bin]]
+name = "csm"
+path = "src/main.rs"
+
+[lib]
+name = "csm"
+path = "src/lib.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4.4", features = ["derive", "env", "string"] }
+
+# TUI
+ratatui = "0.26"
+crossterm = "0.27"
+
+# Async
+tokio = { version = "1.35", features = ["full"] }
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled", "blob", "serde_json"] }
+
+# Git
+git2 = "0.18"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+directories = "5.0"
+sha2 = "0.10"
+base64 = "0.22"
+url = "2.5"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3.10"
+assert_cmd = "2.0"
+predicates = "3.1"
+wiremock = "0.6"
+pretty_assertions = "1.4"
+tokio-test = "0.4"
+mockall = "0.12"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
