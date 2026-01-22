@@ -258,32 +258,124 @@ impl std::str::FromStr for UpdateMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
+    // D-SK-01: test_skill_new_creates_valid_skill
     #[test]
-    fn test_skill_new() {
+    fn test_skill_new_creates_valid_skill() {
         let skill = Skill::new("test-skill", SkillSource::Inline, SkillScope::Global);
+
         assert_eq!(skill.name, "test-skill");
         assert!(skill.enabled);
         assert_eq!(skill.priority, 50);
+        assert!(skill.description.is_none());
+        assert!(skill.tags.is_empty());
+        assert_eq!(skill.content_hash, "");
+        assert_eq!(skill.update_mode, UpdateMode::Auto);
+        assert!(skill.scope.is_global());
+        // Verify UUID is valid
+        assert!(!skill.id.is_nil());
+        // Verify timestamps are set
+        assert!(skill.created_at <= skill.updated_at);
     }
 
+    // D-SK-02: test_skill_builder_all_fields
     #[test]
-    fn test_skill_builder() {
+    fn test_skill_builder_all_fields() {
+        let tags = vec!["rust".to_string(), "testing".to_string()];
+        let source = SkillSource::github("owner", "repo");
+        let scope = SkillScope::project("/my/project");
+
         let skill = Skill::builder("my-skill")
-            .description("A test skill")
-            .priority(100)
+            .description("A comprehensive test skill")
+            .source(source.clone())
+            .scope(scope.clone())
             .enabled(false)
+            .tags(tags.clone())
+            .priority(100)
+            .update_mode(UpdateMode::Manual)
             .build();
 
         assert_eq!(skill.name, "my-skill");
-        assert_eq!(skill.description, Some("A test skill".to_string()));
-        assert_eq!(skill.priority, 100);
+        assert_eq!(skill.description, Some("A comprehensive test skill".to_string()));
+        assert_eq!(skill.source, source);
+        assert_eq!(skill.scope, scope);
         assert!(!skill.enabled);
+        assert_eq!(skill.tags, tags);
+        assert_eq!(skill.priority, 100);
+        assert_eq!(skill.update_mode, UpdateMode::Manual);
     }
 
+    // D-SK-03: test_skill_builder_defaults
+    #[test]
+    fn test_skill_builder_defaults() {
+        let skill = Skill::builder("default-skill").build();
+
+        assert_eq!(skill.name, "default-skill");
+        assert!(skill.description.is_none());
+        assert_eq!(skill.source, SkillSource::Inline);
+        assert_eq!(skill.scope, SkillScope::Global);
+        assert!(skill.enabled);
+        assert!(skill.tags.is_empty());
+        assert_eq!(skill.priority, 50);
+        assert_eq!(skill.update_mode, UpdateMode::Auto);
+    }
+
+    // D-SK-04: test_skill_scope_display
+    #[test]
+    fn test_skill_scope_display() {
+        let global = SkillScope::Global;
+        assert_eq!(format!("{}", global), "global");
+
+        let project = SkillScope::project("/my/project");
+        assert_eq!(format!("{}", project), "project:/my/project");
+    }
+
+    // D-SK-05: test_skill_scope_serialization
+    #[test]
+    fn test_skill_scope_serialization() {
+        // Global scope
+        let global = SkillScope::Global;
+        let json = serde_json::to_string(&global).unwrap();
+        let deserialized: SkillScope = serde_json::from_str(&json).unwrap();
+        assert_eq!(global, deserialized);
+
+        // Project scope
+        let project = SkillScope::project("/my/project");
+        let json = serde_json::to_string(&project).unwrap();
+        let deserialized: SkillScope = serde_json::from_str(&json).unwrap();
+        assert_eq!(project, deserialized);
+    }
+
+    // D-SK-06: test_update_mode_from_str
+    #[test]
+    fn test_update_mode_from_str() {
+        assert_eq!("auto".parse::<UpdateMode>().unwrap(), UpdateMode::Auto);
+        assert_eq!("AUTO".parse::<UpdateMode>().unwrap(), UpdateMode::Auto);
+        assert_eq!("Auto".parse::<UpdateMode>().unwrap(), UpdateMode::Auto);
+        assert_eq!("notify".parse::<UpdateMode>().unwrap(), UpdateMode::Notify);
+        assert_eq!("NOTIFY".parse::<UpdateMode>().unwrap(), UpdateMode::Notify);
+        assert_eq!("manual".parse::<UpdateMode>().unwrap(), UpdateMode::Manual);
+        assert_eq!("MANUAL".parse::<UpdateMode>().unwrap(), UpdateMode::Manual);
+
+        let err = "invalid".parse::<UpdateMode>();
+        assert!(err.is_err());
+        assert!(err.unwrap_err().contains("Invalid update mode"));
+    }
+
+    // D-SK-07: test_update_mode_default
+    #[test]
+    fn test_update_mode_default() {
+        assert_eq!(UpdateMode::default(), UpdateMode::Auto);
+    }
+
+    // Additional tests for complete coverage
     #[test]
     fn test_skill_is_remote() {
-        let local = Skill::new("local", SkillSource::Inline, SkillScope::Global);
+        let inline = Skill::new("inline", SkillSource::Inline, SkillScope::Global);
+        assert!(!inline.is_remote());
+
+        let local = Skill::new("local", SkillSource::local("/path"), SkillScope::Global);
         assert!(!local.is_remote());
 
         let github = Skill::new(
@@ -298,13 +390,67 @@ mod tests {
             SkillScope::Global,
         );
         assert!(github.is_remote());
+
+        let url = Skill::new(
+            "url",
+            SkillSource::url("https://example.com/skill.md"),
+            SkillScope::Global,
+        );
+        assert!(url.is_remote());
     }
 
     #[test]
-    fn test_update_mode_from_str() {
-        assert_eq!("auto".parse::<UpdateMode>().unwrap(), UpdateMode::Auto);
-        assert_eq!("notify".parse::<UpdateMode>().unwrap(), UpdateMode::Notify);
-        assert_eq!("manual".parse::<UpdateMode>().unwrap(), UpdateMode::Manual);
-        assert!("invalid".parse::<UpdateMode>().is_err());
+    fn test_skill_is_global() {
+        let global = Skill::new("global", SkillSource::Inline, SkillScope::Global);
+        assert!(global.is_global());
+
+        let project = Skill::new("local", SkillSource::Inline, SkillScope::project("/path"));
+        assert!(!project.is_global());
+    }
+
+    #[test]
+    fn test_skill_default() {
+        let skill = Skill::default();
+        assert_eq!(skill.name, "unnamed");
+        assert_eq!(skill.source, SkillSource::Inline);
+        assert_eq!(skill.scope, SkillScope::Global);
+    }
+
+    #[test]
+    fn test_skill_scope_methods() {
+        let global = SkillScope::Global;
+        assert!(global.is_global());
+        assert!(global.project_path().is_none());
+
+        let project = SkillScope::project("/my/project");
+        assert!(!project.is_global());
+        assert_eq!(project.project_path(), Some(PathBuf::from("/my/project").as_path()));
+    }
+
+    #[test]
+    fn test_skill_scope_default() {
+        assert_eq!(SkillScope::default(), SkillScope::Global);
+    }
+
+    #[test]
+    fn test_update_mode_display() {
+        assert_eq!(format!("{}", UpdateMode::Auto), "auto");
+        assert_eq!(format!("{}", UpdateMode::Notify), "notify");
+        assert_eq!(format!("{}", UpdateMode::Manual), "manual");
+    }
+
+    #[test]
+    fn test_skill_serialization() {
+        let skill = Skill::builder("test")
+            .description("Test skill")
+            .priority(75)
+            .build();
+
+        let json = serde_json::to_string(&skill).unwrap();
+        let deserialized: Skill = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(skill.name, deserialized.name);
+        assert_eq!(skill.description, deserialized.description);
+        assert_eq!(skill.priority, deserialized.priority);
     }
 }

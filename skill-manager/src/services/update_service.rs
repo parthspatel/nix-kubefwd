@@ -257,7 +257,232 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::domain::{SkillScope, SkillSource, Skill, EventBus, UpdateMode};
+    use crate::services::traits::mocks::*;
+    use crate::services::traits::{MergeService as MergeServiceTrait, UpdateInfo};
+    use crate::utils::error::Result;
+    use async_trait::async_trait;
+    use std::sync::{Arc, RwLock};
 
-    // Tests will be added in the test planning phase
+    // Mock merge service for tests
+    struct MockMergeService;
+
+    #[async_trait]
+    impl MergeServiceTrait for MockMergeService {
+        async fn merge(&self, _scope: &SkillScope) -> Result<String> {
+            Ok("merged".to_string())
+        }
+        async fn rebuild_all(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn create_github_skill(name: &str, sha: &str) -> Skill {
+        Skill::builder(name)
+            .source(SkillSource::GitHub {
+                owner: "owner".to_string(),
+                repo: "repo".to_string(),
+                path: None,
+                ref_spec: Some("main".to_string()),
+                commit_sha: Some(sha.to_string()),
+            })
+            .build()
+    }
+
+    fn create_url_skill(name: &str) -> Skill {
+        Skill::builder(name)
+            .source(SkillSource::Url {
+                url: "https://example.com/skill.md".to_string(),
+                etag: Some("etag123".to_string()),
+            })
+            .build()
+    }
+
+    // S-UP-01: test_check_update_github_new_commit (mock will return update info)
+    #[tokio::test]
+    async fn test_check_update_github_new_commit() {
+        use crate::services::UpdateService;
+        let repo = MockSkillRepository::new();
+        let storage = MockSkillStorage::new();
+        let github = MockGitHubClient::new();
+
+        // Set up update info
+        *github.update_info.lock().unwrap() = Some(UpdateInfo {
+            current_sha: "old_sha".to_string(),
+            latest_sha: "new_sha".to_string(),
+            commits_behind: 2,
+            commit_messages: vec!["commit 1".to_string(), "commit 2".to_string()],
+        });
+
+        let skill = create_github_skill("test-skill", "old_sha");
+        repo.skills.lock().unwrap().push(skill.clone());
+        storage.content.lock().unwrap().insert(skill.id, "content".to_string());
+
+        let service = super::UpdateServiceImpl::new(
+            Arc::new(repo),
+            Arc::new(storage),
+            Arc::new(github),
+            Arc::new(MockUrlClient::new()),
+            Arc::new(MockMergeService),
+            Arc::new(RwLock::new(EventBus::new())),
+        );
+
+        let updates = service.check().await.unwrap();
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].1.commits_behind, 2);
+    }
+
+    // S-UP-02: test_check_update_github_no_change
+    #[tokio::test]
+    async fn test_check_update_github_no_change() {
+        use crate::services::UpdateService;
+        let repo = MockSkillRepository::new();
+        let github = MockGitHubClient::new();
+        // update_info is None by default, meaning no update
+
+        let skill = create_github_skill("test-skill", "current_sha");
+        repo.skills.lock().unwrap().push(skill);
+
+        let service = super::UpdateServiceImpl::new(
+            Arc::new(repo),
+            Arc::new(MockSkillStorage::new()),
+            Arc::new(github),
+            Arc::new(MockUrlClient::new()),
+            Arc::new(MockMergeService),
+            Arc::new(RwLock::new(EventBus::new())),
+        );
+
+        let updates = service.check().await.unwrap();
+        assert!(updates.is_empty());
+    }
+
+    // S-UP-03: test_check_update_url_etag_changed
+    #[tokio::test]
+    async fn test_check_update_url_etag_changed() {
+        use crate::services::UpdateService;
+        let repo = MockSkillRepository::new();
+        let url_client = MockUrlClient::new();
+        *url_client.modified.lock().unwrap() = true; // URL has changed
+
+        let skill = create_url_skill("test-skill");
+        repo.skills.lock().unwrap().push(skill);
+
+        let service = super::UpdateServiceImpl::new(
+            Arc::new(repo),
+            Arc::new(MockSkillStorage::new()),
+            Arc::new(MockGitHubClient::new()),
+            Arc::new(url_client),
+            Arc::new(MockMergeService),
+            Arc::new(RwLock::new(EventBus::new())),
+        );
+
+        let updates = service.check().await.unwrap();
+        assert_eq!(updates.len(), 1);
+    }
+
+    // S-UP-05: test_apply_update_success
+    #[tokio::test]
+    async fn test_apply_update_success() {
+        use crate::services::UpdateService;
+        let repo = MockSkillRepository::new();
+        let storage = MockSkillStorage::new();
+        let github = MockGitHubClient::with_content(
+            "# Updated Content".to_string(),
+            "new_file_sha".to_string(),
+            "new_commit_sha".to_string(),
+        );
+
+        // Set up update info
+        *github.update_info.lock().unwrap() = Some(UpdateInfo {
+            current_sha: "old_sha".to_string(),
+            latest_sha: "new_sha".to_string(),
+            commits_behind: 1,
+            commit_messages: vec!["update".to_string()],
+        });
+
+        let mut skill = create_github_skill("test-skill", "old_sha");
+        skill.content_hash = "old_hash".to_string();
+        repo.skills.lock().unwrap().push(skill.clone());
+        storage.content.lock().unwrap().insert(skill.id, "# Old Content".to_string());
+
+        let service = super::UpdateServiceImpl::new(
+            Arc::new(repo),
+            Arc::new(storage),
+            Arc::new(github),
+            Arc::new(MockUrlClient::new()),
+            Arc::new(MockMergeService),
+            Arc::new(RwLock::new(EventBus::new())),
+        );
+
+        let updated = service.update_skill("test-skill").await.unwrap();
+        assert!(updated);
+    }
+
+    // S-UP-07: test_update_mode_manual_skipped
+    #[tokio::test]
+    async fn test_update_mode_manual_skipped() {
+        use crate::services::UpdateService;
+        let repo = MockSkillRepository::new();
+        let github = MockGitHubClient::new();
+
+        // Set up update info
+        *github.update_info.lock().unwrap() = Some(UpdateInfo {
+            current_sha: "old_sha".to_string(),
+            latest_sha: "new_sha".to_string(),
+            commits_behind: 1,
+            commit_messages: vec![],
+        });
+
+        let mut skill = create_github_skill("manual-skill", "old_sha");
+        skill.update_mode = UpdateMode::Manual;
+        repo.skills.lock().unwrap().push(skill);
+
+        let service = super::UpdateServiceImpl::new(
+            Arc::new(repo),
+            Arc::new(MockSkillStorage::new()),
+            Arc::new(github),
+            Arc::new(MockUrlClient::new()),
+            Arc::new(MockMergeService),
+            Arc::new(RwLock::new(EventBus::new())),
+        );
+
+        // update_all should skip manual skills
+        let results = service.update_all().await.unwrap();
+        assert!(results.is_empty()); // Manual skill was skipped
+    }
+
+    #[tokio::test]
+    async fn test_update_skill_not_found() {
+        use crate::services::UpdateService;
+        let service = super::UpdateServiceImpl::new(
+            Arc::new(MockSkillRepository::new()),
+            Arc::new(MockSkillStorage::new()),
+            Arc::new(MockGitHubClient::new()),
+            Arc::new(MockUrlClient::new()),
+            Arc::new(MockMergeService),
+            Arc::new(RwLock::new(EventBus::new())),
+        );
+
+        let result = service.update_skill("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_update_inline_skill_error() {
+        use crate::services::UpdateService;
+        let repo = MockSkillRepository::new();
+        repo.skills.lock().unwrap().push(Skill::new("inline", SkillSource::Inline, SkillScope::Global));
+
+        let service = super::UpdateServiceImpl::new(
+            Arc::new(repo),
+            Arc::new(MockSkillStorage::new()),
+            Arc::new(MockGitHubClient::new()),
+            Arc::new(MockUrlClient::new()),
+            Arc::new(MockMergeService),
+            Arc::new(RwLock::new(EventBus::new())),
+        );
+
+        let result = service.update_skill("inline").await;
+        assert!(result.is_err()); // Cannot update inline source
+    }
 }

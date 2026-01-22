@@ -233,8 +233,9 @@ mod tests {
         }
     }
 
+    // D-EV-01: test_event_bus_subscribe_publish
     #[test]
-    fn test_event_bus() {
+    fn test_event_bus_subscribe_publish() {
         let mut bus = EventBus::new();
         let count = Arc::new(AtomicUsize::new(0));
 
@@ -249,21 +250,204 @@ mod tests {
             SkillScope::Global,
         );
 
+        assert_eq!(count.load(Ordering::SeqCst), 0);
         bus.publish(&event);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
         bus.publish(&event);
-
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
 
+    // D-EV-02: test_event_bus_multiple_subscribers
     #[test]
-    fn test_event_summary() {
+    fn test_event_bus_multiple_subscribers() {
+        let mut bus = EventBus::new();
+        let count1 = Arc::new(AtomicUsize::new(0));
+        let count2 = Arc::new(AtomicUsize::new(0));
+        let count3 = Arc::new(AtomicUsize::new(0));
+
+        bus.subscribe(Box::new(CountingHandler { count: count1.clone() }));
+        bus.subscribe(Box::new(CountingHandler { count: count2.clone() }));
+        bus.subscribe(Box::new(CountingHandler { count: count3.clone() }));
+
         let event = DomainEvent::skill_added(
             Uuid::new_v4(),
-            "my-skill",
+            "test",
             SkillSource::Inline,
             SkillScope::Global,
         );
 
-        assert_eq!(event.summary(), "Added skill: my-skill");
+        bus.publish(&event);
+
+        // All three handlers should receive the event
+        assert_eq!(count1.load(Ordering::SeqCst), 1);
+        assert_eq!(count2.load(Ordering::SeqCst), 1);
+        assert_eq!(count3.load(Ordering::SeqCst), 1);
+    }
+
+    // D-EV-03: test_domain_event_variants
+    #[test]
+    fn test_domain_event_variants() {
+        let skill_id = Uuid::new_v4();
+        let conflict_id = Uuid::new_v4();
+
+        // SkillAdded
+        let event = DomainEvent::skill_added(
+            skill_id,
+            "test-skill",
+            SkillSource::Inline,
+            SkillScope::Global,
+        );
+        assert!(event.summary().contains("Added skill"));
+        assert!(event.timestamp() <= Utc::now());
+
+        // SkillRemoved
+        let event = DomainEvent::skill_removed(skill_id, "test-skill");
+        assert!(event.summary().contains("Removed skill"));
+
+        // SkillEnabled
+        let event = DomainEvent::skill_enabled(skill_id, "test-skill");
+        assert!(event.summary().contains("Enabled skill"));
+
+        // SkillDisabled
+        let event = DomainEvent::skill_disabled(skill_id, "test-skill");
+        assert!(event.summary().contains("Disabled skill"));
+
+        // SkillUpdated
+        let event = DomainEvent::skill_updated(skill_id, "test-skill", "old_hash", "new_hash");
+        assert!(event.summary().contains("Updated skill"));
+
+        // ConflictDetected
+        let event = DomainEvent::ConflictDetected {
+            conflict_id,
+            skill_a_id: skill_id,
+            skill_b_id: Uuid::new_v4(),
+            conflict_type: ConflictType::Duplicate,
+            timestamp: Utc::now(),
+        };
+        assert!(event.summary().contains("Conflict detected"));
+
+        // ConflictResolved
+        let event = DomainEvent::ConflictResolved {
+            conflict_id,
+            resolution: "Kept skill A".to_string(),
+            timestamp: Utc::now(),
+        };
+        assert!(event.summary().contains("Conflict resolved"));
+
+        // SkillsMerged
+        let event = DomainEvent::SkillsMerged {
+            skill_count: 5,
+            output_path: "/path/to/CLAUDE.md".to_string(),
+            timestamp: Utc::now(),
+        };
+        assert!(event.summary().contains("Merged 5 skills"));
+
+        // SystemInitialized
+        let event = DomainEvent::SystemInitialized {
+            csm_home: "/home/user/.csm".to_string(),
+            timestamp: Utc::now(),
+        };
+        assert!(event.summary().contains("System initialized"));
+
+        // ConfigChanged
+        let event = DomainEvent::ConfigChanged {
+            key: "auto_update".to_string(),
+            old_value: Some("true".to_string()),
+            new_value: "false".to_string(),
+            timestamp: Utc::now(),
+        };
+        assert!(event.summary().contains("Config changed"));
+    }
+
+    #[test]
+    fn test_event_timestamp() {
+        let before = Utc::now();
+        let event = DomainEvent::skill_added(
+            Uuid::new_v4(),
+            "test",
+            SkillSource::Inline,
+            SkillScope::Global,
+        );
+        let after = Utc::now();
+
+        let ts = event.timestamp();
+        assert!(ts >= before);
+        assert!(ts <= after);
+    }
+
+    #[test]
+    fn test_event_summary() {
+        let skill_id = Uuid::new_v4();
+
+        assert_eq!(
+            DomainEvent::skill_added(skill_id, "my-skill", SkillSource::Inline, SkillScope::Global)
+                .summary(),
+            "Added skill: my-skill"
+        );
+
+        assert_eq!(
+            DomainEvent::skill_removed(skill_id, "my-skill").summary(),
+            "Removed skill: my-skill"
+        );
+
+        assert_eq!(
+            DomainEvent::skill_enabled(skill_id, "my-skill").summary(),
+            "Enabled skill: my-skill"
+        );
+
+        assert_eq!(
+            DomainEvent::skill_disabled(skill_id, "my-skill").summary(),
+            "Disabled skill: my-skill"
+        );
+
+        assert_eq!(
+            DomainEvent::skill_updated(skill_id, "my-skill", "old", "new").summary(),
+            "Updated skill: my-skill"
+        );
+    }
+
+    #[test]
+    fn test_event_serialization() {
+        let event = DomainEvent::skill_added(
+            Uuid::new_v4(),
+            "test-skill",
+            SkillSource::Inline,
+            SkillScope::Global,
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("skill_added"));
+        assert!(json.contains("test-skill"));
+
+        let deserialized: DomainEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(event.summary(), deserialized.summary());
+    }
+
+    #[test]
+    fn test_event_bus_no_subscribers() {
+        let bus = EventBus::new();
+        let event = DomainEvent::skill_added(
+            Uuid::new_v4(),
+            "test",
+            SkillSource::Inline,
+            SkillScope::Global,
+        );
+
+        // Should not panic with no subscribers
+        bus.publish(&event);
+    }
+
+    #[test]
+    fn test_event_bus_default() {
+        let bus = EventBus::default();
+        let event = DomainEvent::skill_added(
+            Uuid::new_v4(),
+            "test",
+            SkillSource::Inline,
+            SkillScope::Global,
+        );
+
+        // Should work with default
+        bus.publish(&event);
     }
 }

@@ -311,62 +311,274 @@ pub trait MergeService: Send + Sync {
 #[cfg(test)]
 pub mod mocks {
     use super::*;
-    use mockall::mock;
+    use std::sync::{Arc, Mutex};
 
-    mock! {
-        pub SkillRepository {}
+    /// Simple mock for SkillRepository
+    #[derive(Default)]
+    pub struct MockSkillRepository {
+        pub skills: Arc<Mutex<Vec<Skill>>>,
+        pub exists_result: Arc<Mutex<Option<bool>>>,
+    }
 
-        #[async_trait]
-        impl SkillRepository for SkillRepository {
-            async fn create(&self, skill: &Skill) -> Result<()>;
-            async fn get(&self, id: Uuid) -> Result<Option<Skill>>;
-            async fn get_by_name(&self, name: &str) -> Result<Option<Skill>>;
-            async fn update(&self, skill: &Skill) -> Result<()>;
-            async fn delete(&self, id: Uuid) -> Result<()>;
-            async fn list(&self) -> Result<Vec<Skill>>;
-            async fn list_by_scope(&self, scope: &SkillScope) -> Result<Vec<Skill>>;
-            async fn list_enabled(&self) -> Result<Vec<Skill>>;
-            async fn search(&self, query: &str) -> Result<Vec<Skill>>;
-            async fn exists(&self, name: &str) -> Result<bool>;
+    impl MockSkillRepository {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn with_skills(skills: Vec<Skill>) -> Self {
+            Self {
+                skills: Arc::new(Mutex::new(skills)),
+                exists_result: Arc::new(Mutex::new(None)),
+            }
         }
     }
 
-    mock! {
-        pub SkillStorage {}
+    #[async_trait]
+    impl SkillRepository for MockSkillRepository {
+        async fn create(&self, skill: &Skill) -> Result<()> {
+            self.skills.lock().unwrap().push(skill.clone());
+            Ok(())
+        }
 
-        #[async_trait]
-        impl SkillStorage for SkillStorage {
-            async fn store(&self, skill_id: Uuid, content: &str) -> Result<String>;
-            async fn read(&self, skill_id: Uuid) -> Result<String>;
-            async fn delete(&self, skill_id: Uuid) -> Result<()>;
-            async fn exists(&self, skill_id: Uuid) -> Result<bool>;
-            fn get_path(&self, skill_id: Uuid) -> std::path::PathBuf;
-            fn hash_content(&self, content: &str) -> String;
+        async fn get(&self, id: Uuid) -> Result<Option<Skill>> {
+            Ok(self.skills.lock().unwrap().iter().find(|s| s.id == id).cloned())
+        }
+
+        async fn get_by_name(&self, name: &str) -> Result<Option<Skill>> {
+            Ok(self.skills.lock().unwrap().iter().find(|s| s.name == name).cloned())
+        }
+
+        async fn update(&self, skill: &Skill) -> Result<()> {
+            let mut skills = self.skills.lock().unwrap();
+            if let Some(existing) = skills.iter_mut().find(|s| s.id == skill.id) {
+                *existing = skill.clone();
+            }
+            Ok(())
+        }
+
+        async fn delete(&self, id: Uuid) -> Result<()> {
+            self.skills.lock().unwrap().retain(|s| s.id != id);
+            Ok(())
+        }
+
+        async fn list(&self) -> Result<Vec<Skill>> {
+            Ok(self.skills.lock().unwrap().clone())
+        }
+
+        async fn list_by_scope(&self, scope: &SkillScope) -> Result<Vec<Skill>> {
+            Ok(self.skills.lock().unwrap().iter().filter(|s| &s.scope == scope).cloned().collect())
+        }
+
+        async fn list_enabled(&self) -> Result<Vec<Skill>> {
+            Ok(self.skills.lock().unwrap().iter().filter(|s| s.enabled).cloned().collect())
+        }
+
+        async fn search(&self, query: &str) -> Result<Vec<Skill>> {
+            Ok(self.skills.lock().unwrap().iter()
+                .filter(|s| s.name.contains(query) || s.description.as_ref().is_some_and(|d| d.contains(query)))
+                .cloned()
+                .collect())
+        }
+
+        async fn exists(&self, name: &str) -> Result<bool> {
+            if let Some(result) = *self.exists_result.lock().unwrap() {
+                return Ok(result);
+            }
+            Ok(self.skills.lock().unwrap().iter().any(|s| s.name == name))
         }
     }
 
-    mock! {
-        pub GitHubClient {}
+    /// Simple mock for SkillStorage
+    #[derive(Default)]
+    pub struct MockSkillStorage {
+        pub content: Arc<Mutex<std::collections::HashMap<Uuid, String>>>,
+    }
 
-        #[async_trait]
-        impl GitHubClient for GitHubClient {
-            async fn fetch_content(
-                &self,
-                owner: &str,
-                repo: &str,
-                path: Option<&str>,
-                ref_spec: Option<&str>,
-            ) -> Result<FetchResult>;
+    impl MockSkillStorage {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
 
-            async fn check_updates(
-                &self,
-                owner: &str,
-                repo: &str,
-                current_sha: &str,
-                ref_spec: Option<&str>,
-            ) -> Result<Option<UpdateInfo>>;
+    #[async_trait]
+    impl SkillStorage for MockSkillStorage {
+        async fn store(&self, skill_id: Uuid, content: &str) -> Result<String> {
+            let hash = self.hash_content(content);
+            self.content.lock().unwrap().insert(skill_id, content.to_string());
+            Ok(hash)
+        }
 
-            async fn rate_limit(&self) -> Result<RateLimitInfo>;
+        async fn read(&self, skill_id: Uuid) -> Result<String> {
+            self.content.lock().unwrap()
+                .get(&skill_id)
+                .cloned()
+                .ok_or_else(|| crate::utils::error::Error::not_found("Skill content"))
+        }
+
+        async fn delete(&self, skill_id: Uuid) -> Result<()> {
+            self.content.lock().unwrap().remove(&skill_id);
+            Ok(())
+        }
+
+        async fn exists(&self, skill_id: Uuid) -> Result<bool> {
+            Ok(self.content.lock().unwrap().contains_key(&skill_id))
+        }
+
+        fn get_path(&self, skill_id: Uuid) -> std::path::PathBuf {
+            std::path::PathBuf::from(format!("/mock/skills/{}.md", skill_id))
+        }
+
+        fn hash_content(&self, content: &str) -> String {
+            use sha2::{Sha256, Digest};
+            let mut hasher = Sha256::new();
+            hasher.update(content.as_bytes());
+            format!("{:x}", hasher.finalize())
+        }
+    }
+
+    /// Simple mock for GitHubClient
+    #[derive(Default)]
+    pub struct MockGitHubClient {
+        pub fetch_result: Arc<Mutex<Option<FetchResult>>>,
+        pub update_info: Arc<Mutex<Option<UpdateInfo>>>,
+    }
+
+    impl MockGitHubClient {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn with_content(content: String, sha: String, commit_sha: String) -> Self {
+            Self {
+                fetch_result: Arc::new(Mutex::new(Some(FetchResult { content, sha, commit_sha }))),
+                update_info: Arc::new(Mutex::new(None)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl GitHubClient for MockGitHubClient {
+        async fn fetch_content(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _path: Option<&str>,
+            _ref_spec: Option<&str>,
+        ) -> Result<FetchResult> {
+            self.fetch_result.lock().unwrap()
+                .clone()
+                .ok_or_else(|| crate::utils::error::Error::github("No mock result configured"))
+        }
+
+        async fn check_updates(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _current_sha: &str,
+            _ref_spec: Option<&str>,
+        ) -> Result<Option<UpdateInfo>> {
+            Ok(self.update_info.lock().unwrap().clone())
+        }
+
+        async fn rate_limit(&self) -> Result<RateLimitInfo> {
+            Ok(RateLimitInfo {
+                limit: 60,
+                remaining: 60,
+                reset: 0,
+            })
+        }
+    }
+
+    /// Simple mock for UrlClient
+    #[derive(Default)]
+    pub struct MockUrlClient {
+        pub fetch_result: Arc<Mutex<Option<UrlFetchResult>>>,
+        pub modified: Arc<Mutex<bool>>,
+    }
+
+    impl MockUrlClient {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn with_content(content: String) -> Self {
+            Self {
+                fetch_result: Arc::new(Mutex::new(Some(UrlFetchResult { content, etag: None }))),
+                modified: Arc::new(Mutex::new(false)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl UrlClient for MockUrlClient {
+        async fn fetch(&self, _url: &str) -> Result<UrlFetchResult> {
+            self.fetch_result.lock().unwrap()
+                .clone()
+                .ok_or_else(|| crate::utils::error::Error::network("No mock result configured"))
+        }
+
+        async fn check_modified(&self, _url: &str, _etag: Option<&str>) -> Result<bool> {
+            Ok(*self.modified.lock().unwrap())
+        }
+    }
+
+    /// Simple mock for ConflictRepository
+    #[derive(Default)]
+    pub struct MockConflictRepository {
+        pub conflicts: Arc<Mutex<Vec<Conflict>>>,
+    }
+
+    impl MockConflictRepository {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    #[async_trait]
+    impl ConflictRepository for MockConflictRepository {
+        async fn create(&self, conflict: &Conflict) -> Result<()> {
+            self.conflicts.lock().unwrap().push(conflict.clone());
+            Ok(())
+        }
+
+        async fn get(&self, id: Uuid) -> Result<Option<Conflict>> {
+            Ok(self.conflicts.lock().unwrap().iter().find(|c| c.id == id).cloned())
+        }
+
+        async fn update(&self, conflict: &Conflict) -> Result<()> {
+            let mut conflicts = self.conflicts.lock().unwrap();
+            if let Some(existing) = conflicts.iter_mut().find(|c| c.id == conflict.id) {
+                *existing = conflict.clone();
+            }
+            Ok(())
+        }
+
+        async fn delete(&self, id: Uuid) -> Result<()> {
+            self.conflicts.lock().unwrap().retain(|c| c.id != id);
+            Ok(())
+        }
+
+        async fn list(&self) -> Result<Vec<Conflict>> {
+            Ok(self.conflicts.lock().unwrap().clone())
+        }
+
+        async fn list_unresolved(&self) -> Result<Vec<Conflict>> {
+            Ok(self.conflicts.lock().unwrap().iter()
+                .filter(|c| !c.is_resolved())
+                .cloned()
+                .collect())
+        }
+
+        async fn list_by_skill(&self, skill_id: Uuid) -> Result<Vec<Conflict>> {
+            Ok(self.conflicts.lock().unwrap().iter()
+                .filter(|c| c.skill_a_id == skill_id || c.skill_b_id == skill_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn delete_by_skill(&self, skill_id: Uuid) -> Result<()> {
+            self.conflicts.lock().unwrap().retain(|c| c.skill_a_id != skill_id && c.skill_b_id != skill_id);
+            Ok(())
         }
     }
 }

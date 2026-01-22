@@ -183,6 +183,16 @@ impl Error {
     pub fn network(msg: impl Into<String>) -> Self {
         Self::Network(msg.into())
     }
+
+    /// Create a not found error
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        Self::SkillNotFound(msg.into())
+    }
+
+    /// Create an other/generic error
+    pub fn other(msg: impl Into<String>) -> Self {
+        Self::Other(msg.into())
+    }
 }
 
 // Convert from rusqlite errors

@@ -277,6 +277,7 @@ impl std::fmt::Display for ResolutionStrategy {
 mod tests {
     use super::*;
 
+    // D-CF-01: test_conflict_new
     #[test]
     fn test_conflict_new() {
         let skill_a = Uuid::new_v4();
@@ -292,7 +293,58 @@ mod tests {
         assert_eq!(conflict.skill_a_id, skill_a);
         assert_eq!(conflict.skill_b_id, skill_b);
         assert_eq!(conflict.conflict_type, ConflictType::Duplicate);
+        assert_eq!(conflict.description, "Test conflict");
         assert!(!conflict.is_resolved());
+        assert!(!conflict.id.is_nil());
+        assert!(conflict.line_a.is_none());
+        assert!(conflict.line_b.is_none());
+        assert!(conflict.content_a.is_none());
+        assert!(conflict.content_b.is_none());
+        assert!(conflict.suggestion.is_none());
+        assert_eq!(conflict.status, ConflictStatus::Unresolved);
+        assert!(conflict.resolved_at.is_none());
+    }
+
+    // D-CF-02: test_conflict_type_display
+    #[test]
+    fn test_conflict_type_display() {
+        assert_eq!(format!("{}", ConflictType::Duplicate), "Duplicate");
+        assert_eq!(format!("{}", ConflictType::Contradictory), "Contradictory");
+        assert_eq!(format!("{}", ConflictType::Overlap), "Overlap");
+        assert_eq!(format!("{}", ConflictType::Structural), "Structural");
+    }
+
+    // D-CF-03: test_conflict_status_display
+    #[test]
+    fn test_conflict_status_display() {
+        assert_eq!(format!("{}", ConflictStatus::Unresolved), "unresolved");
+        assert_eq!(format!("{}", ConflictStatus::Resolved), "resolved");
+        assert_eq!(format!("{}", ConflictStatus::Ignored), "ignored");
+    }
+
+    // D-CF-04: test_resolution_strategy_variants
+    #[test]
+    fn test_resolution_strategy_variants() {
+        // Verify all variants can be created and displayed
+        let strategies = [
+            ResolutionStrategy::DisableSkillA,
+            ResolutionStrategy::DisableSkillB,
+            ResolutionStrategy::PrioritizeA,
+            ResolutionStrategy::PrioritizeB,
+            ResolutionStrategy::Ignore,
+        ];
+
+        let expected_displays = [
+            "Disable first skill",
+            "Disable second skill",
+            "Prioritize first skill",
+            "Prioritize second skill",
+            "Ignore conflict",
+        ];
+
+        for (strategy, expected) in strategies.iter().zip(expected_displays.iter()) {
+            assert_eq!(format!("{}", strategy), *expected);
+        }
     }
 
     #[test]
@@ -307,10 +359,16 @@ mod tests {
             .suggestion("Choose one style")
             .build();
 
+        assert_eq!(conflict.skill_a_id, skill_a);
+        assert_eq!(conflict.skill_b_id, skill_b);
+        assert_eq!(conflict.conflict_type, ConflictType::Contradictory);
+        assert_eq!(conflict.description, "Use tabs vs use spaces");
         assert_eq!(conflict.line_a, Some(10));
         assert_eq!(conflict.line_b, Some(20));
         assert_eq!(conflict.content_a, Some("Use tabs".to_string()));
-        assert!(conflict.suggestion.is_some());
+        assert_eq!(conflict.content_b, Some("Use spaces".to_string()));
+        assert_eq!(conflict.suggestion, Some("Choose one style".to_string()));
+        assert_eq!(conflict.status, ConflictStatus::Unresolved);
     }
 
     #[test]
@@ -323,6 +381,7 @@ mod tests {
         );
 
         assert!(!conflict.is_resolved());
+        assert!(conflict.resolved_at.is_none());
 
         conflict.resolve();
 
@@ -340,9 +399,79 @@ mod tests {
             "Test",
         );
 
+        assert!(!conflict.is_resolved());
+
         conflict.ignore();
 
         assert!(conflict.is_resolved());
         assert_eq!(conflict.status, ConflictStatus::Ignored);
+        assert!(conflict.resolved_at.is_some());
+    }
+
+    #[test]
+    fn test_conflict_type_label_and_description() {
+        assert_eq!(ConflictType::Duplicate.label(), "Duplicate");
+        assert_eq!(ConflictType::Contradictory.label(), "Contradictory");
+        assert_eq!(ConflictType::Overlap.label(), "Overlap");
+        assert_eq!(ConflictType::Structural.label(), "Structural");
+
+        assert!(ConflictType::Duplicate.description().contains("instruction"));
+        assert!(ConflictType::Contradictory.description().contains("contradict"));
+        assert!(ConflictType::Overlap.description().contains("overlapping"));
+        assert!(ConflictType::Structural.description().contains("structure"));
+    }
+
+    #[test]
+    fn test_conflict_status_default() {
+        assert_eq!(ConflictStatus::default(), ConflictStatus::Unresolved);
+    }
+
+    #[test]
+    fn test_conflict_serialization() {
+        let conflict = Conflict::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            ConflictType::Duplicate,
+            "Test conflict",
+        );
+
+        let json = serde_json::to_string(&conflict).unwrap();
+        let deserialized: Conflict = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(conflict.id, deserialized.id);
+        assert_eq!(conflict.skill_a_id, deserialized.skill_a_id);
+        assert_eq!(conflict.skill_b_id, deserialized.skill_b_id);
+        assert_eq!(conflict.conflict_type, deserialized.conflict_type);
+        assert_eq!(conflict.description, deserialized.description);
+        assert_eq!(conflict.status, deserialized.status);
+    }
+
+    #[test]
+    fn test_conflict_type_serialization() {
+        for ct in [ConflictType::Duplicate, ConflictType::Contradictory, ConflictType::Overlap, ConflictType::Structural] {
+            let json = serde_json::to_string(&ct).unwrap();
+            let deserialized: ConflictType = serde_json::from_str(&json).unwrap();
+            assert_eq!(ct, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_conflict_status_serialization() {
+        for cs in [ConflictStatus::Unresolved, ConflictStatus::Resolved, ConflictStatus::Ignored] {
+            let json = serde_json::to_string(&cs).unwrap();
+            let deserialized: ConflictStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(cs, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_conflict_builder_minimal() {
+        let conflict = Conflict::builder(Uuid::new_v4(), Uuid::new_v4(), ConflictType::Overlap)
+            .build();
+
+        assert!(conflict.description.is_empty());
+        assert!(conflict.line_a.is_none());
+        assert!(conflict.content_a.is_none());
+        assert!(conflict.suggestion.is_none());
     }
 }
