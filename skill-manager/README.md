@@ -19,6 +19,7 @@ This directory contains the complete design documentation for Claude Skill Manag
 | [04-CLI-SPECIFICATION.md](docs/design/04-CLI-SPECIFICATION.md) | CLI interface design with all commands and options |
 | [05-TUI-SPECIFICATION.md](docs/design/05-TUI-SPECIFICATION.md) | TUI wireframes, storyboards, and interaction design |
 | [06-USER-JOURNEYS.md](docs/design/06-USER-JOURNEYS.md) | User personas, journey maps, and interaction flows |
+| [09-USE-CASES.md](docs/design/09-USE-CASES.md) | Textual use cases and UML use case diagrams |
 
 ### Technical Documentation
 
