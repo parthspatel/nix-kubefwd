@@ -1,59 +1,34 @@
-//! List command implementation
+//! Search command implementation
 
 use crate::cli::commands::AppContext;
 use crate::domain::SkillScope;
 use crate::utils::error::Result;
 
-/// Execute the list command
-pub async fn execute(
-    scope: &str,
-    enabled_only: bool,
-    disabled_only: bool,
-    json: bool,
-) -> Result<()> {
+/// Execute the search command
+pub async fn execute(query: &str, json: bool) -> Result<()> {
     let ctx = AppContext::new()?;
 
-    // Parse scope filter
-    let scope_filter = match scope {
-        "global" => Some(SkillScope::Global),
-        "local" => {
-            let cwd = std::env::current_dir()?;
-            Some(SkillScope::Project { path: cwd })
-        }
-        "all" | _ => None,
-    };
-
-    // Get skills from repository
     use crate::services::SkillService;
-    let mut skills = ctx.skill_service.list(scope_filter, false).await?;
-
-    // Apply enabled/disabled filter
-    if enabled_only {
-        skills.retain(|s| s.enabled);
-    } else if disabled_only {
-        skills.retain(|s| !s.enabled);
-    }
+    let results = ctx.skill_service.search(query).await?;
 
     if json {
-        // JSON output
-        let output = serde_json::to_string_pretty(&skills)?;
+        let output = serde_json::to_string_pretty(&results)?;
         println!("{}", output);
     } else {
-        // Table output
-        if skills.is_empty() {
-            println!("No skills found.");
-            println!();
-            println!("Use 'csm add <source>' to add a skill.");
+        if results.is_empty() {
+            println!("No skills found matching '{}'", query);
             return Ok(());
         }
 
+        println!("Found {} skill(s) matching '{}':", results.len(), query);
+        println!();
         println!(
             "{:<20} {:<10} {:<8} {:<30}",
             "NAME", "SCOPE", "STATUS", "SOURCE"
         );
         println!("{}", "-".repeat(70));
 
-        for skill in &skills {
+        for skill in &results {
             let scope_str = match &skill.scope {
                 SkillScope::Global => "global".to_string(),
                 SkillScope::Project { path } => {
@@ -67,7 +42,6 @@ pub async fn execute(
             let status = if skill.enabled { "enabled" } else { "disabled" };
             let source = skill.source.display_string();
 
-            // Truncate source if too long
             let source_display = if source.len() > 28 {
                 format!("{}...", &source[..25])
             } else {
@@ -79,9 +53,6 @@ pub async fn execute(
                 skill.name, scope_str, status, source_display
             );
         }
-
-        println!();
-        println!("Total: {} skill(s)", skills.len());
     }
 
     Ok(())

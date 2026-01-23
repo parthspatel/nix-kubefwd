@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::domain::{Conflict, Skill, SkillScope, SkillSource};
+use crate::domain::{Conflict, Skill, SkillScope};
 use crate::utils::error::Result;
 
 // =============================================================================

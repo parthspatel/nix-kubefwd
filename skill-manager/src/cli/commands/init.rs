@@ -4,7 +4,12 @@ use crate::infra::ConfigManagerImpl;
 use crate::utils::error::{Error, Result};
 
 /// Execute the init command
-pub async fn execute(global: bool, local: bool, force: bool, import_existing: bool) -> Result<()> {
+pub async fn execute(
+    _global: bool,
+    _local: bool,
+    force: bool,
+    import_existing: bool,
+) -> Result<()> {
     let csm_home = ConfigManagerImpl::detect_csm_home();
 
     // Check if migration from legacy ~/.csm is needed
@@ -25,8 +30,10 @@ pub async fn execute(global: bool, local: bool, force: bool, import_existing: bo
         }
     }
 
-    // Check if already initialized
-    if csm_home.exists() && !force {
+    // Check if already initialized (has config.toml or registry.db)
+    let config_path = csm_home.join("config.toml");
+    let db_path = csm_home.join("registry.db");
+    if (config_path.exists() || db_path.exists()) && !force {
         return Err(Error::AlreadyInitialized);
     }
 
@@ -39,19 +46,17 @@ pub async fn execute(global: bool, local: bool, force: bool, import_existing: bo
     std::fs::create_dir_all(csm_home.join("logs")).map_err(|e| Error::Io(e))?;
 
     // Initialize config
-    let mut config_manager = ConfigManagerImpl::new(csm_home.clone());
+    let config_manager = ConfigManagerImpl::new(csm_home.clone());
     config_manager.save()?;
 
     // Initialize database
-    let db_path = csm_home.join("registry.db");
     let _skill_repo = crate::infra::SqliteSkillRepository::new(&db_path)?;
     let _conflict_repo = crate::infra::SqliteConflictRepository::new(&db_path)?;
 
     println!("CSM initialized successfully at {}", csm_home.display());
 
     if import_existing {
-        println!("Scanning for existing CLAUDE.md files...");
-        // TODO: Implement import
+        todo!("import existing CLAUDE.md files")
     }
 
     Ok(())

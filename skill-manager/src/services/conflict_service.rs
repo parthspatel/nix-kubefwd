@@ -138,14 +138,14 @@ where
             ResolutionStrategy::PrioritizeA => {
                 // Increase A's priority, decrease B's
                 if let Some(mut skill_a) = self.skill_repo.get(conflict.skill_a_id).await? {
-                    if let Some(mut skill_b) = self.skill_repo.get(conflict.skill_b_id).await? {
+                    if let Some(skill_b) = self.skill_repo.get(conflict.skill_b_id).await? {
                         skill_a.priority = skill_b.priority + 10;
                         self.skill_repo.update(&skill_a).await?;
                     }
                 }
             }
             ResolutionStrategy::PrioritizeB => {
-                if let Some(mut skill_a) = self.skill_repo.get(conflict.skill_a_id).await? {
+                if let Some(skill_a) = self.skill_repo.get(conflict.skill_a_id).await? {
                     if let Some(mut skill_b) = self.skill_repo.get(conflict.skill_b_id).await? {
                         skill_b.priority = skill_a.priority + 10;
                         self.skill_repo.update(&skill_b).await?;

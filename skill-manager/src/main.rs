@@ -63,9 +63,7 @@ async fn execute_command(cli: Cli) -> Result<(), Error> {
         } => csm::cli::commands::add::execute(&source, name.as_deref(), &scope, &update_mode).await,
 
         Commands::Remove { skill, force } => {
-            // TODO: Implement remove command
-            println!("Remove command: skill={}, force={}", skill, force);
-            Ok(())
+            csm::cli::commands::remove::execute(&skill, force || cli.yes).await
         }
 
         Commands::List {
@@ -75,78 +73,39 @@ async fn execute_command(cli: Cli) -> Result<(), Error> {
         } => csm::cli::commands::list::execute(&scope, enabled, disabled, cli.json).await,
 
         Commands::Show { skill, content } => {
-            // TODO: Implement show command
-            println!("Show command: skill={}, content={}", skill, content);
-            Ok(())
+            csm::cli::commands::show::execute(&skill, content, cli.json).await
         }
 
-        Commands::Enable { skill } => {
-            // TODO: Implement enable command
-            println!("Enable command: skill={}", skill);
-            Ok(())
-        }
+        Commands::Enable { skill } => csm::cli::commands::enable::execute_enable(&skill).await,
 
-        Commands::Disable { skill } => {
-            // TODO: Implement disable command
-            println!("Disable command: skill={}", skill);
-            Ok(())
-        }
+        Commands::Disable { skill } => csm::cli::commands::enable::execute_disable(&skill).await,
 
         Commands::Update {
             skill,
             check,
             dry_run,
-        } => {
-            // TODO: Implement update command
-            println!(
-                "Update command: skill={:?}, check={}, dry_run={}",
-                skill, check, dry_run
-            );
-            Ok(())
-        }
+        } => csm::cli::commands::update::execute(skill.as_deref(), check, dry_run).await,
 
         Commands::Conflicts { resolve } => {
-            // TODO: Implement conflicts command
-            println!("Conflicts command: resolve={}", resolve);
-            Ok(())
+            csm::cli::commands::conflicts::execute(resolve, cli.json).await
         }
 
-        Commands::Search { query } => {
-            // TODO: Implement search command
-            println!("Search command: query={}", query);
-            Ok(())
-        }
+        Commands::Search { query } => csm::cli::commands::search::execute(&query, cli.json).await,
 
-        Commands::Config { action } => {
-            match action {
-                ConfigAction::Get { key } => {
-                    // TODO: Implement config get
-                    println!("Config get: key={}", key);
-                }
-                ConfigAction::Set { key, value } => {
-                    // TODO: Implement config set
-                    println!("Config set: key={}, value={}", key, value);
-                }
-                ConfigAction::List => {
-                    // TODO: Implement config list
-                    println!("Config list");
-                }
-                ConfigAction::Edit => {
-                    // TODO: Implement config edit
-                    println!("Config edit");
-                }
-                ConfigAction::Reset { force } => {
-                    // TODO: Implement config reset
-                    println!("Config reset: force={}", force);
-                }
+        Commands::Config { action } => match action {
+            ConfigAction::Get { key } => csm::cli::commands::config::execute_get(&key).await,
+            ConfigAction::Set { key, value } => {
+                csm::cli::commands::config::execute_set(&key, &value).await
             }
-            Ok(())
-        }
+            ConfigAction::List => csm::cli::commands::config::execute_list(cli.json).await,
+            ConfigAction::Edit => csm::cli::commands::config::execute_edit().await,
+            ConfigAction::Reset { force } => {
+                csm::cli::commands::config::execute_reset(force || cli.yes).await
+            }
+        },
 
         Commands::Sync { rebuild, verify } => {
-            // TODO: Implement sync command
-            println!("Sync command: rebuild={}, verify={}", rebuild, verify);
-            Ok(())
+            csm::cli::commands::sync::execute(rebuild, verify).await
         }
 
         Commands::Export {
@@ -155,60 +114,32 @@ async fn execute_command(cli: Cli) -> Result<(), Error> {
             format,
             output,
         } => {
-            // TODO: Implement export command
-            println!(
-                "Export command: all={}, skill={:?}, format={}, output={:?}",
-                all, skill, format, output
-            );
-            Ok(())
+            csm::cli::commands::export::execute(all, skill.as_deref(), &format, output.as_deref())
+                .await
         }
 
         Commands::Import {
             source,
             merge,
             dry_run,
-        } => {
-            // TODO: Implement import command
-            println!(
-                "Import command: source={}, merge={}, dry_run={}",
-                source, merge, dry_run
-            );
-            Ok(())
-        }
+        } => csm::cli::commands::import::execute(&source, merge, dry_run).await,
 
         Commands::Create {
             name,
             from,
             scope,
             edit,
-        } => {
-            // TODO: Implement create command
-            println!(
-                "Create command: name={}, from={:?}, scope={}, edit={}",
-                name, from, scope, edit
-            );
-            Ok(())
-        }
+        } => csm::cli::commands::create::execute(&name, from.as_deref(), &scope, edit).await,
 
         Commands::Edit { skill, editor } => {
-            // TODO: Implement edit command
-            println!("Edit command: skill={}, editor={:?}", skill, editor);
-            Ok(())
+            csm::cli::commands::edit::execute(&skill, editor.as_deref()).await
         }
 
         Commands::Ui { section } => csm::tui::run(section.as_deref()).await,
 
-        Commands::Doctor { fix } => {
-            // TODO: Implement doctor command
-            println!("Doctor command: fix={}", fix);
-            Ok(())
-        }
+        Commands::Doctor { fix } => csm::cli::commands::doctor::execute(fix).await,
 
-        Commands::Completions { shell } => {
-            // TODO: Implement completions command
-            println!("Completions command: shell={}", shell);
-            Ok(())
-        }
+        Commands::Completions { shell } => csm::cli::commands::completions::execute(&shell).await,
 
         Commands::Migrate { dry_run, force } => {
             csm::cli::commands::migrate::execute(dry_run, force).await

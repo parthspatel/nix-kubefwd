@@ -59,11 +59,9 @@ where
     /// Fetch content from a source
     async fn fetch_content(&self, source: &SkillSource) -> Result<String> {
         match source {
-            SkillSource::Local { path } => {
-                tokio::fs::read_to_string(path)
-                    .await
-                    .map_err(|e| Error::FileNotFound(path.clone()))
-            }
+            SkillSource::Local { path } => tokio::fs::read_to_string(path)
+                .await
+                .map_err(|_| Error::FileNotFound(path.clone())),
             SkillSource::GitHub {
                 owner,
                 repo,
@@ -133,13 +131,10 @@ where
 {
     async fn add(&self, source_str: &str, name: Option<&str>, scope: SkillScope) -> Result<Skill> {
         // Parse the source
-        let parsed = parse_source(source_str)
-            .map_err(|e| Error::InvalidSource(e.to_string()))?;
+        let parsed = parse_source(source_str).map_err(|e| Error::InvalidSource(e.to_string()))?;
 
         // Determine the name
-        let skill_name = name
-            .map(String::from)
-            .unwrap_or(parsed.suggested_name);
+        let skill_name = name.map(String::from).unwrap_or(parsed.suggested_name);
 
         // Validate name
         if skill_name.is_empty() {
@@ -291,7 +286,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{SkillScope, SkillSource, Skill, EventBus};
+    use crate::domain::{EventBus, Skill, SkillScope, SkillSource};
     use crate::services::traits::mocks::*;
     use crate::services::traits::MergeService as MergeServiceTrait;
     use crate::utils::error::{Error, Result};
@@ -311,7 +306,13 @@ mod tests {
         }
     }
 
-    fn create_test_service() -> super::SkillServiceImpl<MockSkillRepository, MockSkillStorage, MockGitHubClient, MockUrlClient, MockMergeService> {
+    fn create_test_service() -> super::SkillServiceImpl<
+        MockSkillRepository,
+        MockSkillStorage,
+        MockGitHubClient,
+        MockUrlClient,
+        MockMergeService,
+    > {
         super::SkillServiceImpl::new(
             Arc::new(MockSkillRepository::new()),
             Arc::new(MockSkillStorage::new()),
@@ -320,7 +321,9 @@ mod tests {
                 "abc123".to_string(),
                 "def456".to_string(),
             )),
-            Arc::new(MockUrlClient::with_content("# URL Skill\n\nURL content".to_string())),
+            Arc::new(MockUrlClient::with_content(
+                "# URL Skill\n\nURL content".to_string(),
+            )),
             Arc::new(MockMergeService),
             Arc::new(RwLock::new(EventBus::new())),
         )
@@ -332,7 +335,9 @@ mod tests {
         use crate::services::SkillService;
         let service = create_test_service();
 
-        let result = service.add("github:owner/repo", None, SkillScope::Global).await;
+        let result = service
+            .add("github:owner/repo", None, SkillScope::Global)
+            .await;
         assert!(result.is_ok());
 
         let skill = result.unwrap();
@@ -348,7 +353,9 @@ mod tests {
         use crate::services::SkillService;
         let service = create_test_service();
 
-        let result = service.add("https://example.com/skill.md", None, SkillScope::Global).await;
+        let result = service
+            .add("https://example.com/skill.md", None, SkillScope::Global)
+            .await;
         assert!(result.is_ok());
 
         let skill = result.unwrap();
@@ -367,13 +374,19 @@ mod tests {
         let service = super::SkillServiceImpl::new(
             Arc::new(repo),
             Arc::new(MockSkillStorage::new()),
-            Arc::new(MockGitHubClient::with_content("content".to_string(), "sha".to_string(), "sha".to_string())),
+            Arc::new(MockGitHubClient::with_content(
+                "content".to_string(),
+                "sha".to_string(),
+                "sha".to_string(),
+            )),
             Arc::new(MockUrlClient::with_content("content".to_string())),
             Arc::new(MockMergeService),
             Arc::new(RwLock::new(EventBus::new())),
         );
 
-        let result = service.add("github:owner/my-skill", None, SkillScope::Global).await;
+        let result = service
+            .add("github:owner/my-skill", None, SkillScope::Global)
+            .await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::SkillExists(_)));
     }
@@ -386,7 +399,11 @@ mod tests {
         let storage = MockSkillStorage::new();
         let skill = Skill::new("test-skill", SkillSource::Inline, SkillScope::Global);
         repo.skills.lock().unwrap().push(skill.clone());
-        storage.content.lock().unwrap().insert(skill.id, "content".to_string());
+        storage
+            .content
+            .lock()
+            .unwrap()
+            .insert(skill.id, "content".to_string());
 
         let service = super::SkillServiceImpl::new(
             Arc::new(repo),
@@ -495,8 +512,16 @@ mod tests {
     async fn test_list_skills_all() {
         use crate::services::SkillService;
         let repo = MockSkillRepository::new();
-        repo.skills.lock().unwrap().push(Skill::new("skill-1", SkillSource::Inline, SkillScope::Global));
-        repo.skills.lock().unwrap().push(Skill::new("skill-2", SkillSource::Inline, SkillScope::Global));
+        repo.skills.lock().unwrap().push(Skill::new(
+            "skill-1",
+            SkillSource::Inline,
+            SkillScope::Global,
+        ));
+        repo.skills.lock().unwrap().push(Skill::new(
+            "skill-2",
+            SkillSource::Inline,
+            SkillScope::Global,
+        ));
 
         let service = super::SkillServiceImpl::new(
             Arc::new(repo),
@@ -516,8 +541,16 @@ mod tests {
     async fn test_list_skills_by_scope() {
         use crate::services::SkillService;
         let repo = MockSkillRepository::new();
-        repo.skills.lock().unwrap().push(Skill::new("global-skill", SkillSource::Inline, SkillScope::Global));
-        repo.skills.lock().unwrap().push(Skill::new("project-skill", SkillSource::Inline, SkillScope::project("/my/project")));
+        repo.skills.lock().unwrap().push(Skill::new(
+            "global-skill",
+            SkillSource::Inline,
+            SkillScope::Global,
+        ));
+        repo.skills.lock().unwrap().push(Skill::new(
+            "project-skill",
+            SkillSource::Inline,
+            SkillScope::project("/my/project"),
+        ));
 
         let service = super::SkillServiceImpl::new(
             Arc::new(repo),

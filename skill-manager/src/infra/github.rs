@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::services::{FetchResult, GitHubClient, RateLimitInfo, UpdateInfo, UrlClient, UrlFetchResult};
+use crate::services::{
+    FetchResult, GitHubClient, RateLimitInfo, UpdateInfo, UrlClient, UrlFetchResult,
+};
 use crate::utils::error::{Error, Result};
 
 /// GitHub API client
@@ -48,6 +50,7 @@ impl GitHubClientImpl {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GitHubFileResponse {
     sha: String,
     content: String,
@@ -105,10 +108,7 @@ impl GitHubClient for GitHubClientImpl {
             self.base_url, owner, repo, file_path, ref_param
         );
 
-        let response = self
-            .build_request(&url)
-            .send()
-            .await?;
+        let response = self.build_request(&url).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(Error::RepoNotFound {
@@ -119,7 +119,9 @@ impl GitHubClient for GitHubClientImpl {
 
         if response.status() == reqwest::StatusCode::FORBIDDEN {
             // Check if rate limited
-            if response.headers().get("x-ratelimit-remaining")
+            if response
+                .headers()
+                .get("x-ratelimit-remaining")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u32>().ok())
                 == Some(0)
