@@ -25,6 +25,10 @@ If missing, run `product-development` skill first.
 | Write tests | ✅ Implements test cases | Reviews coverage |
 | Implement code | ✅ Writes implementation | Reviews, approves |
 | Debug failures | ✅ Analyzes, proposes fixes | Confirms direction |
+| Code review | ✅ Reviews, provides feedback | Addresses feedback |
+| Refactoring | ✅ Applies safe transformations | Approves scope |
+| Migrations | ✅ Plans, executes with rollback | Approves timing |
+| Performance | ✅ Profiles, optimizes | Defines targets |
 | Approval gates | ✅ Shows status, asks | Approves / requests changes |
 
 ## Iteration Limits
@@ -34,6 +38,10 @@ If missing, run `product-development` skill first.
 | Test coverage review | 3 | "Coverage target may be unrealistic" |
 | Red-Green-Refactor | 5 per component | "Component may need redesign" |
 | Fix-Retest (simulation) | 3 | "Architecture may have fundamental issues" |
+| Code review rounds | 3 | "May need design discussion" |
+| Debugging hypotheses | 5 | "Escalate for additional expertise" |
+| Refactoring steps | 10 per session | "Break into smaller sessions" |
+| Performance iterations | 5 | "Diminishing returns reached" |
 
 **Escalation options**: (A) Accept current state, (B) Reduce scope, (C) Return to `product-development` for redesign
 
@@ -63,6 +71,8 @@ project/
 │                    SOFTWARE ENGINEERING                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
+│  CORE DEVELOPMENT PHASES                                        │
+│  ─────────────────────────                                      │
 │  Phase 1: Code Scaffolding ──────────────────→ User Approval    │
 │                                                     │           │
 │                                          ┌──────────┘           │
@@ -80,6 +90,19 @@ project/
 │           │         ▲                                           │
 │           │         │                                           │
 │           └─── Fix/Retest Loop                                  │
+│                                                                 │
+│  QUALITY & MAINTENANCE PHASES (use as needed)                   │
+│  ────────────────────────────────────────────                   │
+│  Phase 5: Code Review ──────────────────────→ Merge Decision    │
+│                                                                 │
+│  Phase 6: Debugging ──── Hypothesis Loop ───→ Root Cause Found  │
+│                                                                 │
+│  Phase 7: Refactoring ─── Safe Change Loop ─→ Quality Improved  │
+│                                                                 │
+│  Phase 8: Migrations & Upgrades ────────────→ System Updated    │
+│                                                                 │
+│  Phase 9: Performance Optimization ─────────→ Targets Met       │
+│           (Flame Graph Driven)                                  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -375,6 +398,195 @@ Simulation Testing:
 | [Issue] | [Fix] |
 
 **Production Ready?**
+```
+
+---
+
+## Phase 5: Code Review
+
+**Goal**: Ensure code quality through systematic review.
+
+### When to Use
+
+- Before merging pull requests
+- After implementation phase
+- For knowledge sharing and mentorship
+
+### Review Dimensions
+
+| Dimension | Focus |
+|-----------|-------|
+| Correctness | Logic, edge cases, error handling |
+| Security | Input validation, auth, secrets |
+| Performance | N+1 queries, caching, algorithms |
+| Maintainability | Readability, complexity, DRY |
+| Testing | Coverage, meaningful tests |
+
+### Approval Gate
+
+```markdown
+## Code Review Complete
+
+**Decision**: [Approved / Changes Requested]
+- [ ] All critical issues resolved
+- [ ] Security concerns addressed
+- [ ] Tests adequate and passing
+
+**Merge approved?**
+```
+
+---
+
+## Phase 6: Debugging & Troubleshooting
+
+**Goal**: Systematically diagnose and resolve defects.
+
+### Debugging Process
+
+```
+Issue → Characterize → Hypothesize → Investigate → Root Cause → Fix → Verify
+```
+
+### Techniques
+
+| Technique | When |
+|-----------|------|
+| Binary Search (git bisect) | Finding bad commit |
+| Print/Log Debugging | Tracing flow |
+| Divide and Conquer | Isolating component |
+| Minimal Reproduction | Complex systems |
+
+### Approval Gate
+
+```markdown
+## Debugging Complete
+
+**Root Cause**: [Summary]
+- [ ] Issue no longer reproduces
+- [ ] Tests added for this case
+- [ ] Similar patterns audited
+
+**Issue resolved?**
+```
+
+---
+
+## Phase 7: Refactoring
+
+**Goal**: Improve code structure without changing behavior.
+
+### Safe Refactoring Cycle
+
+```
+Green Tests → Small Change → Run Tests → Pass? → Commit → Repeat
+```
+
+### Common Refactorings
+
+| Smell | Technique |
+|-------|-----------|
+| Long Method | Extract Method |
+| Large Class | Extract Class |
+| Duplicate Code | Extract Method/Class |
+| Feature Envy | Move Method |
+| Long Parameter List | Introduce Parameter Object |
+
+### Approval Gate
+
+```markdown
+## Refactoring Complete
+
+**Metrics**:
+| Metric | Before | After |
+|--------|--------|-------|
+| Complexity | [X] | [Y] |
+| Duplication | [X]% | [Y]% |
+
+- [ ] All tests still passing
+- [ ] No behavior changes
+
+**Refactoring verified?**
+```
+
+---
+
+## Phase 8: Migrations & Upgrades
+
+**Goal**: Safely evolve systems with rollback capability.
+
+### Migration Types
+
+| Type | Key Concern |
+|------|-------------|
+| Dependency Upgrade | Breaking changes |
+| Database Migration | Data integrity, downtime |
+| API Migration | Backward compatibility |
+| Data Migration | Validation, rollback |
+
+### Expand-Contract Pattern
+
+For breaking changes:
+1. **Expand**: Add new alongside old
+2. **Migrate**: Dual-write period
+3. **Contract**: Remove old
+
+### Approval Gate
+
+```markdown
+## Migration Complete
+
+**Status**: [Complete / Rolled Back]
+- [ ] Validation passes
+- [ ] Rollback tested
+- [ ] Documentation updated
+
+**Migration verified?**
+```
+
+---
+
+## Phase 9: Performance Optimization
+
+**Goal**: Optimize based on profiling data, not assumptions.
+
+### Flame Graph Driven Process
+
+```
+Profile → Flame Graph → Identify Bottleneck → Optimize → Measure → Repeat
+```
+
+### Key Profiling Tools
+
+| Language | CPU Profile | Memory Profile |
+|----------|-------------|----------------|
+| Node.js | 0x, --prof | Heap snapshot |
+| Python | py-spy | mprof, tracemalloc |
+| Go | pprof | pprof heap |
+| Java | async-profiler | jmap, VisualVM |
+
+### Optimization Priorities
+
+1. Database queries (N+1, missing indexes)
+2. I/O operations (caching, batching)
+3. Algorithm complexity (O(n²) → O(n))
+4. Memory allocation (streaming, pooling)
+
+### Approval Gate
+
+```markdown
+## Performance Optimization Complete
+
+**Results**:
+| Metric | Before | After | Target |
+|--------|--------|-------|--------|
+| p95 latency | [X]ms | [Y]ms | [Z]ms |
+| Throughput | [X]/s | [Y]/s | [Z]/s |
+
+- [ ] Targets met
+- [ ] Load tests pass
+- [ ] Monitoring in place
+
+**Performance targets achieved?**
 ```
 
 ---
