@@ -10,11 +10,18 @@
   # https://devenv.sh/basics/
   env = {
     GREET = "devenv";
+    # OpenSSL configuration for Rust builds
+    OPENSSL_DIR = "${pkgs.openssl.dev}";
+    OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+    OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
   };
 
   # https://devenv.sh/packages/
   packages = [
     pkgs.git
+    pkgs.libiconv
+    pkgs.openssl
+    pkgs.pkg-config
     pkgs.python3Packages.sphinx
   ];
 

@@ -248,6 +248,17 @@ pub enum Commands {
         /// Shell: bash, zsh, fish, powershell
         shell: String,
     },
+
+    /// Migrate from legacy ~/.csm to XDG-compliant ~/.config/csm
+    Migrate {
+        /// Show what would be migrated without making changes
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Overwrite existing destination directory
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

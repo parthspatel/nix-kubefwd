@@ -36,8 +36,7 @@ async fn main() {
 
 /// Initialize logging based on environment and verbosity
 fn init_logging() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -54,23 +53,14 @@ async fn execute_command(cli: Cli) -> Result<(), Error> {
             local,
             force,
             import_existing,
-        } => {
-            csm::cli::commands::init::execute(global, local, force, import_existing).await
-        }
+        } => csm::cli::commands::init::execute(global, local, force, import_existing).await,
 
         Commands::Add {
             source,
             name,
             scope,
             update_mode,
-        } => {
-            csm::cli::commands::add::execute(
-                &source,
-                name.as_deref(),
-                &scope,
-                &update_mode,
-            ).await
-        }
+        } => csm::cli::commands::add::execute(&source, name.as_deref(), &scope, &update_mode).await,
 
         Commands::Remove { skill, force } => {
             // TODO: Implement remove command
@@ -82,9 +72,7 @@ async fn execute_command(cli: Cli) -> Result<(), Error> {
             scope,
             enabled,
             disabled,
-        } => {
-            csm::cli::commands::list::execute(&scope, enabled, disabled, cli.json).await
-        }
+        } => csm::cli::commands::list::execute(&scope, enabled, disabled, cli.json).await,
 
         Commands::Show { skill, content } => {
             // TODO: Implement show command
@@ -208,9 +196,7 @@ async fn execute_command(cli: Cli) -> Result<(), Error> {
             Ok(())
         }
 
-        Commands::Ui { section } => {
-            csm::tui::run(section.as_deref()).await
-        }
+        Commands::Ui { section } => csm::tui::run(section.as_deref()).await,
 
         Commands::Doctor { fix } => {
             // TODO: Implement doctor command
@@ -222,6 +208,10 @@ async fn execute_command(cli: Cli) -> Result<(), Error> {
             // TODO: Implement completions command
             println!("Completions command: shell={}", shell);
             Ok(())
+        }
+
+        Commands::Migrate { dry_run, force } => {
+            csm::cli::commands::migrate::execute(dry_run, force).await
         }
     }
 }

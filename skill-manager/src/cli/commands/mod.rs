@@ -1,8 +1,9 @@
 //! CLI command implementations
 
-pub mod init;
 pub mod add;
+pub mod init;
 pub mod list;
+pub mod migrate;
 
 use crate::utils::error::Result;
 

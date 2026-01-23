@@ -62,12 +62,24 @@ pub struct UiConfig {
     pub show_welcome: bool,
 }
 
-fn default_scope() -> String { "local".to_string() }
-fn default_true() -> bool { true }
-fn default_update_mode() -> String { "auto".to_string() }
-fn default_schedule() -> String { "daily".to_string() }
-fn default_ref() -> String { "main".to_string() }
-fn default_theme() -> String { "dark".to_string() }
+fn default_scope() -> String {
+    "local".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_update_mode() -> String {
+    "auto".to_string()
+}
+fn default_schedule() -> String {
+    "daily".to_string()
+}
+fn default_ref() -> String {
+    "main".to_string()
+}
+fn default_theme() -> String {
+    "dark".to_string()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -178,20 +190,59 @@ impl ConfigManagerImpl {
         &mut self.config
     }
 
-    /// Detect CSM home directory
+    /// Detect CSM home directory.
+    ///
+    /// Priority:
+    /// 1. `CSM_HOME` environment variable (explicit override)
+    /// 2. `XDG_CONFIG_HOME/csm` if XDG_CONFIG_HOME is set
+    /// 3. `~/.config/csm` (XDG default)
     pub fn detect_csm_home() -> PathBuf {
-        // Check environment variable first
+        // 1. Check CSM_HOME environment variable (explicit override)
         if let Ok(path) = std::env::var("CSM_HOME") {
             return PathBuf::from(path);
         }
 
-        // Use directories crate for platform-appropriate location
-        if let Some(data_dir) = directories::BaseDirs::new() {
-            return data_dir.home_dir().join(".csm");
+        // 2. Check XDG_CONFIG_HOME environment variable
+        if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+            return PathBuf::from(xdg_config).join("csm");
         }
 
-        // Fallback
-        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".csm")
+        // 3. Default to ~/.config/csm
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            return base_dirs.home_dir().join(".config").join("csm");
+        }
+
+        // 4. Fallback
+        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
+            .join(".config")
+            .join("csm")
+    }
+
+    /// Detect legacy CSM home directory (~/.csm) if it exists.
+    ///
+    /// Returns `Some(path)` if `~/.csm` exists, `None` otherwise.
+    pub fn detect_legacy_home() -> Option<PathBuf> {
+        directories::BaseDirs::new()
+            .map(|dirs| dirs.home_dir().join(".csm"))
+            .filter(|p| p.exists())
+    }
+
+    /// Check if migration from legacy ~/.csm is needed.
+    ///
+    /// Returns `true` if:
+    /// - Legacy `~/.csm` exists
+    /// - New XDG location doesn't exist yet
+    /// - `CSM_HOME` is not set (user hasn't explicitly chosen a location)
+    pub fn needs_migration() -> bool {
+        if std::env::var("CSM_HOME").is_ok() {
+            return false;
+        }
+
+        let legacy_exists = Self::detect_legacy_home().is_some();
+        let new_home = Self::detect_csm_home();
+        let new_exists = new_home.exists();
+
+        legacy_exists && !new_exists
     }
 }
 
@@ -216,23 +267,23 @@ impl ConfigManager for ConfigManagerImpl {
             "general.default_scope" => self.config.general.default_scope = value.to_string(),
             "general.editor" => self.config.general.editor = Some(value.to_string()),
             "general.color" => {
-                self.config.general.color = value.parse().map_err(|_| {
-                    Error::Config(format!("Invalid boolean value: {}", value))
-                })?;
+                self.config.general.color = value
+                    .parse()
+                    .map_err(|_| Error::Config(format!("Invalid boolean value: {}", value)))?;
             }
             "updates.mode" => self.config.updates.mode = value.to_string(),
             "updates.schedule" => self.config.updates.schedule = value.to_string(),
             "updates.check_on_startup" => {
-                self.config.updates.check_on_startup = value.parse().map_err(|_| {
-                    Error::Config(format!("Invalid boolean value: {}", value))
-                })?;
+                self.config.updates.check_on_startup = value
+                    .parse()
+                    .map_err(|_| Error::Config(format!("Invalid boolean value: {}", value)))?;
             }
             "github.default_ref" => self.config.github.default_ref = value.to_string(),
             "ui.theme" => self.config.ui.theme = value.to_string(),
             "ui.show_welcome" => {
-                self.config.ui.show_welcome = value.parse().map_err(|_| {
-                    Error::Config(format!("Invalid boolean value: {}", value))
-                })?;
+                self.config.ui.show_welcome = value
+                    .parse()
+                    .map_err(|_| Error::Config(format!("Invalid boolean value: {}", value)))?;
             }
             _ => return Err(Error::Config(format!("Unknown config key: {}", key))),
         }
@@ -303,7 +354,10 @@ mod tests {
         let mut manager = ConfigManagerImpl::new(temp.path().to_path_buf());
 
         manager.set("general.default_scope", "global").unwrap();
-        assert_eq!(manager.get("general.default_scope"), Some("global".to_string()));
+        assert_eq!(
+            manager.get("general.default_scope"),
+            Some("global".to_string())
+        );
 
         manager.set("general.color", "false").unwrap();
         assert_eq!(manager.get("general.color"), Some("false".to_string()));
